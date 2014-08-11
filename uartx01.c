@@ -164,7 +164,7 @@ void pwm_init( void )
     PUT32(PWM_RNG1, 100);
     usleep(10);
     //set duty cycle to 50%
-    PUT32(PWM_DAT1, 20);
+    PUT32(PWM_DAT1, 75);
     usleep(10);
     //start PWM1
     PUT32(PWM_CTL, GET32(PWM_CTL) | 1);
@@ -242,7 +242,9 @@ int notmain ( unsigned int earlypc )
     hexstring(&tA[0]);
     hexstring(&tB[0]);
     for(i=0;i<(sizeof(tA)/sizeof(tA[0]));i++) tA[i] = 0;
-    for(i=0;i<(sizeof(tB)/sizeof(tB[0]));i++) tB[i] = 0;
+    PUT32(GPSET0, (1<<8));
+    PUT32(GPCLR0, 1<<7);
+//    for(i=0;i<(sizeof(tB)/sizeof(tB[0]));i++) tB[i] = 0;
     
 /*    PUT32(GPCLR0, 1<<17);
   d  for(counter=0; counter<1000000; counter++) 
@@ -296,14 +298,13 @@ int notmain ( unsigned int earlypc )
                 hexstring(step_counter);
                 hexstring(glitch_counter);
                 break;
-            // Count glitches until 200 edge transitions are counted
             case 'm':
+                puts("start\n", 6);
                 iA = iB = 0;
                 step_counter = 0;
                 glitch_counter = 0;
                 tB_0 = tA_0 = GET32(TIMER_CLO);
                 l0 = l1 = 0;
-                current_state = 0b00;//((GET32(GPLEV0)&(1<<17))|(GET32(GPLEV0)&(1<<18)))>>17;
                 while(1) {
 	                next_state = 0;	
                     if (GET32(GPEDS0)&(1<<17)) {
@@ -319,13 +320,12 @@ int notmain ( unsigned int earlypc )
                                PUT32(GPFEN0, GET32(GPFEN0)&(~(1<<17)));
                             }   
                             l0 = !l0;
-                            next_state |= (l0 | 8);
                             tA_0 = tA_1;
                             tA[iA++] = tA_1;
                         } else 
                             glitch_counter++;
                     }
-                    if (GET32(GPEDS0)&(1<<18)) {
+/*                    if (GET32(GPEDS0)&(1<<18)) {
                         PUT32(GPEDS0, 1<<18);
                         tB_1 = GET32(TIMER_CLO);
                         if ((tB_1 - tB_0) > 50) {
@@ -347,46 +347,6 @@ int notmain ( unsigned int earlypc )
                         else
                             glitch_counter++;
                     }
-/*
-                    if ((next_state&8)==0) continue;
-                    next_state &= 3;
-
-                    //hexstring(current_state);
-                    //hexstring(next_state);
-                    //hexstring(step_counter);
-                    if ((current_state^next_state)!=0b11) {
-                        switch(current_state) {
-                            case 0b00:
-                                if (next_state == 0b01)
-                                    step_counter++;
-                                else
-                                    step_counter--;
-                                break;
-                            case 0b01:
-                                if (next_state == 0b11)
-                                    step_counter++;
-                                else
-                                    step_counter--;
-                                break;
-                            case 0b11:
-                                if (next_state == 0b10)
-                                    step_counter++;
-                                else
-                                    step_counter--;
-                                break;
-                            case 0b10:
-                                if (next_state == 0b00)
-                                    step_counter++;
-                                else
-                                    step_counter--;
-                                break;
-                            };
-                       current_state = next_state;
-                    }
-                    else
-                        puts("error\r\n", 7);
-
-                    //puts("\n",1);
 */
                     if (iA == 5000 || iB == 5000) break;
                     //if (step_counter >= 200) break;
