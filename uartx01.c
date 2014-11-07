@@ -1,4 +1,4 @@
-
+#include "spi.h"
 //-------------------------------------------------------------------------
 //-------------------------------------------------------------------------
 
@@ -64,6 +64,40 @@ extern void dummy ( unsigned int );
 #define PWM_RNG1    (PWM_BASE + 0x10)
 #define PWM_DAT1    (PWM_BASE + 0x14)
 
+//#define BSC0_BASE 0x20205000 //BSC0 base
+#define BSC0_BASE 0x20804000 // BSC1 base
+
+#define BSC0_C      (BSC0_BASE + 0x00)
+#define BSC0_S      (BSC0_BASE + 0x04)
+#define BSC0_DLEN   (BSC0_BASE + 0x08)
+#define BSC0_A      (BSC0_BASE + 0x0C)
+#define BSC0_FIFO   (BSC0_BASE + 0x10)
+
+#define BSC_C_I2CEN  (1 << 15)
+#define BSC_C_INTR   (1 << 10)
+#define BSC_C_INTT   (1 << 9)
+#define BSC_C_INTD   (1 << 8)
+#define BSC_C_ST     (1 << 7)
+#define BSC_C_CLEAR  (1 << 4)
+#define BSC_C_READ    1
+
+#define START_READ    BSC_C_I2CEN|BSC_C_ST|BSC_C_CLEAR|BSC_C_READ
+#define START_WRITE   BSC_C_I2CEN|BSC_C_ST
+
+#define BSC_S_CLKT   (1 << 9)
+#define BSC_S_ERR    (1 << 8)
+#define BSC_S_RXF    (1 << 7)
+#define BSC_S_TXE    (1 << 6)
+#define BSC_S_RXD    (1 << 5)
+#define BSC_S_TXD    (1 << 4)
+#define BSC_S_RXR    (1 << 3)
+#define BSC_S_TXW    (1 << 2)
+#define BSC_S_DONE   (1 << 1)
+#define BSC_S_TA     1
+
+#define CLEAR_STATUS    BSC_S_CLKT|BSC_S_ERR|BSC_S_DONE
+
+
 //GPIO14  TXD0 and TXD1
 //GPIO15  RXD0 and RXD1
 //alt function 5 for uart1
@@ -72,6 +106,8 @@ extern void dummy ( unsigned int );
 //(3000000 / (16 * 115200) = 1.627
 //(0.627*64)+0.5 = 40
 //int 1 frac 40
+
+void puts( const char *str, unsigned int n );
 
 //------------------------------------------------------------------------
 void uart_putc ( unsigned int c )
@@ -99,6 +135,16 @@ void usleep( unsigned int ms )
     while (GET32(TIMER_CLO) < t0 + 1000*ms) {}
 }
 //------------------------------------------------------------------------
+void wait_i2c_done() {
+        //Wait till done, let's use a timeout just in case
+        int timeout = 20;
+        while((!(GET32(BSC0_S) & BSC_S_DONE)) && --timeout) {
+            usleep(50);
+        }
+        if(timeout == 0)
+            puts("i2c timeout\n\r",12);
+}
+//------------------------------------------------------------------------
 void gpio_init ( void )
 {
     unsigned int ra;
@@ -123,12 +169,20 @@ void gpio_init ( void )
     ra |= 1<<21; // gpio7 set to output
     ra &= ~(7<<24);
     ra |= 1<<24; // gpio8 set to output
+    ra &= ~(7<<0);
+    ra |= (4<<0); // gpio0 set to alt0: sda
+    ra &= ~(7<<3);
+    ra |= (4<<3); // gpio1 set to alt0: scl
+    ra &= ~(7<<6);
+    ra |= (4<<6);
+    ra &= ~(7<<9);
+    ra |= (4<<9);
     PUT32(GPFSEL0,ra);
 
-    //disable pull up/down to gpio 14, 15
+    //disable pull up/down to gpio 0, 1, 14, 15
     PUT32(GPPUD,0);
     for(ra=0;ra<150;ra++) dummy(ra);
-    PUT32(GPPUDCLK0,(1<<14)|(1<<15));
+    PUT32(GPPUDCLK0,(1<<14)|(1<<15)|(1<<0)|(1<<1)|(1<<2)|(1<<3));
     for(ra=0;ra<150;ra++) dummy(ra);
     PUT32(GPPUDCLK0,0);
 
@@ -138,10 +192,10 @@ void gpio_init ( void )
     PUT32(GPPUDCLK0,(1<<18)|(1<<17)|(1<<6)|(1<<7));
     for(ra=0;ra<150;ra++) dummy(ra);
     PUT32(GPPUDCLK0,0);
-    
+
     //enable rising edge detection
     //on gpio 17
-    PUT32(GPREN0, (1<<17));
+    //PUT32(GPREN0, (1<<17));
     //PUT32(GPFEN0, (1<<18)|(1<<17));
     //PUT32(GPEDS0, (1<<17));
 }
@@ -167,6 +221,13 @@ void pwm_init( void )
     PUT32(PWM_DAT1, 75);
     usleep(10);
     //start PWM1
+    PUT32(PWM_CTL, GET32(PWM_CTL) | 1);
+}
+//------------------------------------------------------------------------
+void pwm_set(unsigned int duty_cycle)
+{
+    PUT32(PWM_DAT1, duty_cycle);
+    usleep(10);
     PUT32(PWM_CTL, GET32(PWM_CTL) | 1);
 }
 //------------------------------------------------------------------------
@@ -235,15 +296,20 @@ int notmain ( unsigned int earlypc )
     glitch_counter = 0;
     tB_0 = tA_0 = GET32(TIMER_CLO);
     gpio_init();
-    pwm_init();
+    //pwm_init();
     uart_init();
     hexstring(0x87654321);
-    hexstring(earlypc);
-    hexstring(&tA[0]);
-    hexstring(&tB[0]);
-    for(i=0;i<(sizeof(tA)/sizeof(tA[0]));i++) tA[i] = 0;
-    PUT32(GPSET0, (1<<8));
-    PUT32(GPCLR0, 1<<7);
+    //hexstring(earlypc);
+    //hexstring(&tA[0]);
+    //hexstring(&tB[0]);
+    //hexstring(&i);
+    //puts("iA: ", 4);
+    //hexstring(&step_counter);
+    //puts("glitch_counter: ", 16);
+    //hexstring(&glitch_counter);
+    //for(i=0;i<(sizeof(tA)/sizeof(tA[0]));i++) tA[i] = 0;
+    //PUT32(GPSET0, (1<<8));
+    //PUT32(GPCLR0, 1<<7);
 //    for(i=0;i<(sizeof(tB)/sizeof(tB[0]));i++) tB[i] = 0;
     
 /*    PUT32(GPCLR0, 1<<17);
@@ -348,12 +414,12 @@ int notmain ( unsigned int earlypc )
                             glitch_counter++;
                     }
 */
-                    if (iA == 5000 || iB == 5000) break;
+                    if (iA == 500 || iB == 500) break;
                     //if (step_counter >= 200) break;
                     
                 }
                 puts("done\n", 5);
-                hexstring(step_counter);
+                hexstring(iA);
                 hexstring(glitch_counter);
                 break;
             // Record the inter edge transition times for 400 transitions
@@ -370,6 +436,50 @@ int notmain ( unsigned int earlypc )
                     if(i>=400) break;
                 }
                 for(i=0;i<400-1;i++) hexstring(a[i+1]-a[i]);
+                break;
+            case '1': pwm_set(10); puts("duty_cycle=10\n", 14); break;
+            case '5': pwm_set(50); puts("duty_cycle=50\n", 14); break;
+            case '7': pwm_set(70); puts("duty_cycle=70\n", 14); break;
+            case '8': pwm_set(80); puts("duty_cycle=80\n", 14); break;
+            case '0': pwm_set(100); puts("duty_cycle=100\n", 14); break;
+            case 's': 
+                spi_begin();
+                i = spi_transfer(i);
+                spi_end();
+                hexstring(i);
+                break;
+            case 'i':
+                while(GET32(BSC0_S) & BSC_S_RXD) {
+                    GET32(BSC0_FIFO);
+                };
+                hexstring(GET32(BSC0_S));
+                puts("Starting i2c test\n\r", 19);
+                PUT32(BSC0_S, CLEAR_STATUS); // Reset status bits (see #define)
+                PUT32(BSC0_A, 1<<6);
+                PUT32(BSC0_DLEN, 1);
+                PUT32(BSC0_FIFO, 0xFD);
+                
+                puts("I2C status: ", 12); 
+                hexstring(GET32(BSC0_S));
+
+                PUT32(BSC0_C, START_WRITE);    // Start Write (see #define)
+                wait_i2c_done();
+
+                puts("Finished writing\n\r", 18);
+                puts("I2C status: ", 12);
+                hexstring(GET32(BSC0_S));
+
+                PUT32(BSC0_DLEN, 1);
+                PUT32(BSC0_S, CLEAR_STATUS); // Reset status bits (see #define)
+                PUT32(BSC0_C, START_READ);    // Start Read after clearing FIFO (see #define)
+                wait_i2c_done();
+
+                puts("Read: ", 6);
+                hexstring(GET32(BSC0_FIFO));
+                puts("Finished i2c test\n\r", 19);
+                /*while(1) {
+                    PUT32(GPCLR0, 0xffffffff);
+                    };*/
                 break;
             case '\x00': break;
             default:

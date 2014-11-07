@@ -23,8 +23,8 @@ vectors.o : vectors.s
 uartx01.o : uartx01.c
 	$(ARMGNU)-gcc $(COPS) -c uartx01.c -o uartx01.o
 
-uartx01.elf : memmap vectors.o uartx01.o 
-	$(ARMGNU)-ld vectors.o uartx01.o -T memmap -o uartx01.elf
+uartx01.elf : memmap vectors.o uartx01.o spi.o
+	$(ARMGNU)-ld vectors.o uartx01.o spi.o -T memmap -o uartx01.elf
 	$(ARMGNU)-objdump -D uartx01.elf > uartx01.list
 
 uartx01.bin : uartx01.elf
@@ -33,8 +33,19 @@ uartx01.bin : uartx01.elf
 uartx01.hex : uartx01.elf
 	$(ARMGNU)-objcopy uartx01.elf -O ihex uartx01.hex
 
+test.o  : test.c
+	$(ARMGNU)-gcc $(COPS) -c $< -o $@
 
 
+spi.o  : spi.c
+	$(ARMGNU)-gcc $(COPS) -c $< -o $@
+
+test_spi.o  : test_spi.c
+	$(ARMGNU)-gcc $(COPS) -c $< -o $@
+
+test_spi.elf : memmap vectors.o test.o spi.o
+	$(ARMGNU)-ld vectors.o test.o spi.o -T memmap -o test.elf
+	$(ARMGNU)-objdump -D test.elf > test.list
 
 
 
