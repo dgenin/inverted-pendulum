@@ -105,6 +105,9 @@ extern void dummy ( unsigned int );
 
 #define CLEAR_STATUS    BSC_S_CLKT|BSC_S_ERR|BSC_S_DONE
 
+/* Global variables */
+int dir = 0;
+volatile int x = 0;
 
 // UART documentation
 //GPIO14  TXD0 and TXD1
@@ -293,23 +296,19 @@ void pwm_set(unsigned int duty_cycle)
 //------------------------------------------------------------------------
 void c_irq_handler()
 {
-  if (GET32(GPEDS0)&(1<<18))
-    {
-      //        counter++;
-      PUT32(GPEDS0, 1<<18);
-      if (GET32(GPLEV0)&(1<<18))
-	PUT32(GPSET0, 1<<17);
-      else
-	PUT32(GPCLR0, 1<<17);
-    }
+  x+=dir;
+  PUT32(GPEDS0, 1<<17);
 }
 //------------------------------------------------------------------------
 int notmain ( unsigned int earlypc )
 {
   unsigned int ra, glitch_counter, l0 = 0, l1 = 0;
-  unsigned int t0, t1, i, t[5000], a[5000];
+  unsigned int t0, t1, i, t[5000], a[5000], j;
   unsigned int step_counter, angle, magnitude;
   char output_buf[100];
+
+  /* Set initial position to 0 */
+  x=0;
 
   /* clear the pins to stop the motor from running */
   PIN_CLR(7);
@@ -323,8 +322,8 @@ int notmain ( unsigned int earlypc )
   
   //PUT32(IRQ_ENABLE2, 0);
   //PUT32(IRQ_ENABLE1, 0);
-  //PUT32(IRQ_ENABLE2, 1<<(49-32));
-  //enable_irq();
+  PUT32(IRQ_ENABLE2, 1<<(49-32));
+  enable_irq();
 
     
   //probably a better way to flush the rx fifo.  depending on if and
@@ -406,37 +405,38 @@ int notmain ( unsigned int earlypc )
     case '7': pwm_set(70); puts("duty_cycle=70\n\r"); break;
     case '8': pwm_set(80); puts("duty_cycle=80\n\r"); break;
     case '0': pwm_set(100); puts("duty_cycle=100\n\r"); break;
-    case 'g': PIN_SET(7);
+    case 'g': 
+      PIN_SET(7);
+      dir = 1;
       puts("start\n\r");
-      i = 0;
-      step_counter = 0;
-      glitch_counter = 0;
-      t0 = GET32(TIMER_CLO);
-      l0 = 0;
-      while(1) {
-	if (GET32(GPEDS0)&(1<<17)) {
-	  PUT32(GPEDS0, 1<<17);
-	  t[i++] = GET32(TIMER_CLO);
-	  if(i>0 && (t[i]-t[i-1])<50) {i--; continue;}
-	  if (l0 == 0) {
-	    PUT32(GPFEN0, GET32(GPFEN0)|(1<<17));
-	    PUT32(GPREN0, GET32(GPREN0)&(~(1<<17)));
-	  }
-	  else {
-	    PUT32(GPREN0, GET32(GPREN0)|(1<<17));
-	    PUT32(GPFEN0, GET32(GPFEN0)&(~(1<<17)));
-	  }
-	  l0 = !l0;
-	  if (i == 500) break;
-	}
+      PUT32(GPREN0, GET32(GPREN0)|(1<<17));
+      i=x+100;
+      j=0;
+      while(x<i) {
+	  j++;
+	  usleep(1);
+	  if (j>100) break;
       }
       puts("done\n\r");
       hexstring(i);
-      hexstring(glitch_counter); 
+      hexstring(x); 
       PIN_CLR(7);
       break;
-    case 'G': PIN_SET(8);
-      usleep(100);
+    case 'G':
+      PIN_SET(8);
+      dir = -1;
+      puts("start\n\r");
+      PUT32(GPREN0, GET32(GPREN0)|(1<<17));
+      i=x-100;
+      j=0;
+      while(x>i) {
+	  j++;
+	  usleep(1);
+	  if (j>100) break;
+      }
+      puts("done\n\r");
+      hexstring(i);
+      hexstring(x); 
       PIN_CLR(8);
       break;
       /*
