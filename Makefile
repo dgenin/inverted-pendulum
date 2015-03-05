@@ -3,7 +3,7 @@ ARMGNU ?= arm-linux-gnueabi
 
 COPS = -Wall -O2 -nostdlib -nostartfiles -ffreestanding -g
 
-gcc : uartx01.hex uartx01.bin
+gcc : driver.hex driver.bin
 
 all : gcc clang
 
@@ -20,35 +20,21 @@ clean :
 vectors.o : vectors.s
 	$(ARMGNU)-as vectors.s -o vectors.o
 
-uartx01.o : uartx01.c
-	$(ARMGNU)-gcc $(COPS) -c uartx01.c -o uartx01.o
+driver.o : driver.c
+	$(ARMGNU)-gcc $(COPS) -c driver.c -o driver.o
 
-uartx01.elf : memmap vectors.o uartx01.o spi.o
-	$(ARMGNU)-ld vectors.o uartx01.o spi.o -T memmap -o uartx01.elf
-	$(ARMGNU)-objdump -D uartx01.elf > uartx01.list
+driver.elf : memmap vectors.o driver.o 
+	$(ARMGNU)-ld vectors.o driver.o -T memmap -o driver.elf
+	$(ARMGNU)-objdump -D driver.elf > driver.list
 
-uartx01.bin : uartx01.elf
-	$(ARMGNU)-objcopy uartx01.elf -O binary uartx01.bin
+driver.bin : driver.elf
+	$(ARMGNU)-objcopy driver.elf -O binary driver.bin
 
-uartx01.hex : uartx01.elf
-	$(ARMGNU)-objcopy uartx01.elf -O ihex uartx01.hex
+driver.hex : driver.elf
+	$(ARMGNU)-objcopy driver.elf -O ihex driver.hex
 
 test.o  : test.c
 	$(ARMGNU)-gcc $(COPS) -c $< -o $@
-
-
-spi.o  : spi.c
-	$(ARMGNU)-gcc $(COPS) -c $< -o $@
-
-test_spi.o  : test_spi.c
-	$(ARMGNU)-gcc $(COPS) -c $< -o $@
-
-test_spi.elf : memmap vectors.o test.o spi.o
-	$(ARMGNU)-ld vectors.o test.o spi.o -T memmap -o test.elf
-	$(ARMGNU)-objdump -D test.elf > test.list
-
-
-
 
 LOPS = -Wall -m32 -emit-llvm
 LLCOPS = -march=arm -mcpu=arm1176jzf-s
@@ -57,24 +43,24 @@ LLCOPS1 = -march=arm -mcpu=arm1176jzf-s
 COPS = -Wall  -O2 -nostdlib -nostartfiles -ffreestanding
 OOPS = -std-compile-opts
 
-clang : uartx01.clang.hex uartx01.clang.bin
+clang : driver.clang.hex driver.clang.bin
 
 
-uartx01.clang.bc : uartx01.c
-	clang $(LOPS) -c uartx01.c -o uartx01.clang.bc
+driver.clang.bc : driver.c
+	clang $(LOPS) -c driver.c -o driver.clang.bc
 
-uartx01.clang.opt.elf : memmap vectors.o uartx01.clang.bc
-	opt $(OOPS) uartx01.clang.bc -o uartx01.clang.opt.bc
-	llc $(LLCOPS) uartx01.clang.opt.bc -o uartx01.clang.opt.s
-	$(ARMGNU)-as uartx01.clang.opt.s -o uartx01.clang.opt.o
-	$(ARMGNU)-ld -o uartx01.clang.opt.elf -T memmap vectors.o uartx01.clang.opt.o
-	$(ARMGNU)-objdump -D uartx01.clang.opt.elf > uartx01.clang.opt.list
+driver.clang.opt.elf : memmap vectors.o driver.clang.bc
+	opt $(OOPS) driver.clang.bc -o driver.clang.opt.bc
+	llc $(LLCOPS) driver.clang.opt.bc -o driver.clang.opt.s
+	$(ARMGNU)-as driver.clang.opt.s -o driver.clang.opt.o
+	$(ARMGNU)-ld -o driver.clang.opt.elf -T memmap vectors.o driver.clang.opt.o
+	$(ARMGNU)-objdump -D driver.clang.opt.elf > driver.clang.opt.list
 
-uartx01.clang.hex : uartx01.clang.opt.elf
-	$(ARMGNU)-objcopy uartx01.clang.opt.elf uartx01.clang.hex -O ihex
+driver.clang.hex : driver.clang.opt.elf
+	$(ARMGNU)-objcopy driver.clang.opt.elf driver.clang.hex -O ihex
 
-uartx01.clang.bin : uartx01.clang.opt.elf
-	$(ARMGNU)-objcopy uartx01.clang.opt.elf uartx01.clang.bin -O binary
+driver.clang.bin : driver.clang.opt.elf
+	$(ARMGNU)-objcopy driver.clang.opt.elf driver.clang.bin -O binary
 
 
 
