@@ -77,6 +77,18 @@ unsigned int uart_getc ( void )
     }
   return(GET32(UART0_DR));
 }
+//------------------------------------------------------------------------
+/* Checks if the UART is readable and reads a single character.
+ * If UART is not readable returns -1.
+ */
+int uart_getc_nb ( void )
+{
+   if((GET32(UART0_FR)&RX_FIFO_EMPTY)==0)
+     return(GET32(UART0_DR));
+   else
+     return -1;
+}
+//------------------------------------------------------------------------
 /* Reads digits from the serial port until the next digit would make
  * the total greater than 2^32-1 or a non-numerical digit is encountered.
  */

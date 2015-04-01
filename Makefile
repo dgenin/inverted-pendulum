@@ -2,6 +2,7 @@
 ARMGNU ?= arm-linux-gnueabi
 
 COPS = -Wall -O2 -nostdlib -nostartfiles -ffreestanding -g
+#COPS = -Wall -O0 -nostdlib -nostartfiles -ffreestanding -g
 
 gcc : driver.hex driver.bin
 

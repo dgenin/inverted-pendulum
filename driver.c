@@ -3,14 +3,23 @@
 #include "pwm.h"
 #include "i2c.h"
 
+#define NOW_TIME() GET32(TIMER_CLO)
+
+#define T_BUFFER_SIZE 10
+#define STALL_TIMEOUT 250000 //in microseonds
+
 /* Global variables */
 int dir = 0; //Motor direction
 int power = 0; //Motor power
 int v = 0; //Current carriage speed
-volatile int x = 0; //Current position
-volatile int t0 = 0, t = 0; //Previous and current tick times
 
+/* Globals updated in the tick ISR */
+volatile int x = 0; //Current position in units of ticks ~ .005"
+volatile unsigned int t[T_BUFFER_SIZE]; //Ring buffer for tick times
+volatile unsigned int t_head;
 
+/* Dummy function to stop compiler from optimizing trivial loops */
+extern void dummy ( unsigned int );
 //------------------------------------------------------------------------
 // Initialization functions
 //------------------------------------------------------------------------
@@ -20,24 +29,28 @@ void gpio_init (void) {
   PUT32(UART0_CR,0);
 
   ra = GET32(GPFSEL1);
-  //Serial port
+  /* Serial port I/O pins */ 
   ra &= ~(7<<12); //gpio14
   ra |= 4<<12;    //alt0
   ra &=~ (7<<15); //gpio15
   ra |= 4<<15;    //alt0
+  /* PWM pin */
   ra &= ~(7<<24); //gpio18
   ra |= 2<<24; //gpio18 set to alt5 = pwm
+  /* Optical encoder input pin */
   ra&=~(7<<21); //gpio17 set to input
   //ra|=1<<21;    //output
 
   PUT32(GPFSEL1,ra);
 
   ra=GET32(GPFSEL0);
+  /* Motor direction control pins */
   ra &= ~(7<<21);
   ra |= 1<<21; // gpio7 set to output
   ra &= ~(7<<24);
   ra |= 1<<24; // gpio8 set to output
   ra &= ~(7<<0);
+  /* I2C I/O pins */
   ra |= (4<<0); // gpio0 set to alt0: sda0
   ra &= ~(7<<3);
   ra |= (4<<3); // gpio1 set to alt0: scl0
@@ -72,26 +85,189 @@ void gpio_init (void) {
 //------------------------------------------------------------------------
 void c_irq_handler()
 {
-  t0 = t;
-  t = GET32(TIMER_CLO);
+  /* Record the current tick time in tick time buffer */
+  t_head = (t_head + 1) % T_BUFFER_SIZE;
+  t[t_head] = GET32(TIMER_CLO);
+  /* Increament position according to direction of motion */
   x+=dir;
+  /* Clear edge detect interrupt flag.
+   * Should be last to avoid (the very unlikely) ISR reentry.
+   */
   PUT32(GPEDS0, 1<<17);
+}
+//------------------------------------------------------------------------
+/* Process command line input*/
+void proccess_cmd(unsigned int cmd)
+{
+}
+/* Set motor voltage */
+void set_motor_voltage(unsigned int duty_cycle)
+{
+  if (duty_cycle > 100 || duty_cycle < 0)
+    puts("Invalid duty cycle.\n\r");
+  else
+    pwm_set(duty_cycle);
+}
+//------------------------------------------------------------------------
+void motor_run(int direction)
+{
+  dir = direction;
+  if (1 == dir)
+    PIN_SET(7);
+  else if (-1 == dir)
+    PIN_SET(8);
+}
+//------------------------------------------------------------------------
+void motor_stop()
+{
+  PIN_CLR(7);
+  PIN_CLR(8);
+  dir = 0;
+}
+//------------------------------------------------------------------------
+void move_to_limit(int direction)
+{
+  unsigned start_head;
+
+  start_head = t_head;
+  set_motor_voltage(70);
+  motor_run(direction);
+  
+  while(t_head == start_head)
+    ;
+  while(((NOW_TIME() - t[t_head]) < STALL_TIMEOUT) || ((NOW_TIME() - t[t_head]) < STALL_TIMEOUT))
+    ;
+  motor_stop();
+  hexstring(x);
+  hexstring(t[t_head]);
+  hexstring(NOW_TIME());
+}
+//------------------------------------------------------------------------
+void move(int direction, int ticks)
+{
+  int i,j;
+
+  puts("start\n\r");
+  i=x+direction*ticks;
+  j=0;
+  motor_run(direction);
+  while((direction*(x-i))<0) {
+    if((NOW_TIME() - t[t_head]) > STALL_TIMEOUT) break;
+    j++;
+    usleep(1);
+    //if (j>ticks) break;
+  }
+  motor_stop();
+  puts("done\n\r");
+  hexstring(i);
+  hexstring(x);
+}
+//------------------------------------------------------------------------
+void reset_x()
+{
+  x=0;
+}
+//------------------------------------------------------------------------
+void i2c1()
+{
+  while(GET32(BSC0_S) & BSC_S_RXD) {
+    GET32(BSC0_FIFO);
+  };
+  puts("Starting i2c test\n\r");
+  puts("Initial i2c status: "); hexstring(GET32(BSC0_S));
+  puts("\n\r");
+  PUT32(BSC0_S, CLEAR_STATUS); // Reset status bits (see #define)
+  PUT32(BSC0_A, 1<<6);
+  PUT32(BSC0_DLEN, 1);
+  PUT32(BSC0_FIFO, 0xFA);
+                
+  puts("I2C status after reset: "); hexstring(GET32(BSC0_S));
+
+  PUT32(BSC0_C, START_WRITE);    // Start Write (see #define)
+  wait_i2c_done();
+
+  puts("Finished writing\n\r");
+  puts("I2C status: ");
+  hexstring(GET32(BSC0_S));
+
+  PUT32(BSC0_DLEN, 1);
+  PUT32(BSC0_S, CLEAR_STATUS); // Reset status bits (see #define)
+  PUT32(BSC0_C, START_READ);    // Start Read after clearing FIFO (see #define)
+  wait_i2c_done();
+
+  puts("Read: "); hexstring(GET32(BSC0_FIFO));
+}
+//------------------------------------------------------------------------
+void i2c2()
+{
+  unsigned int angle, magnitude;
+
+  while(GET32(BSC0_S) & BSC_S_RXD) {
+    GET32(BSC0_FIFO);
+  };
+  PUT32(BSC0_A, 1<<6);
+  PUT32(BSC0_DLEN, 1);
+  puts("Reading magnet angle position in a loop\n\rUse 'q' to interrupt\n\r");
+  while(1){
+    // Read angle
+    PUT32(BSC0_S, CLEAR_STATUS);
+    PUT32(BSC0_FIFO, 0xFB);
+    PUT32(BSC0_C, START_WRITE);
+    wait_i2c_done();
+    PUT32(BSC0_S, CLEAR_STATUS);
+    PUT32(BSC0_C, START_READ);
+    wait_i2c_done();
+    angle = (GET32(BSC0_FIFO)) << 8; //&0xFF) << 6;
+    PUT32(BSC0_S, CLEAR_STATUS);
+    PUT32(BSC0_FIFO, 0xFC);
+    PUT32(BSC0_C, START_WRITE);
+    wait_i2c_done();
+    PUT32(BSC0_S, CLEAR_STATUS);
+    PUT32(BSC0_C, START_READ);
+    wait_i2c_done();
+    angle |= (GET32(BSC0_FIFO)); //&0x3F);
+    hexstring(angle);
+    //Read magnitude
+    PUT32(BSC0_S, CLEAR_STATUS);
+    PUT32(BSC0_FIFO, 0xFF);
+    PUT32(BSC0_C, START_WRITE);
+    wait_i2c_done();
+    PUT32(BSC0_S, CLEAR_STATUS);
+    PUT32(BSC0_C, START_READ);
+    wait_i2c_done();
+    magnitude = (GET32(BSC0_FIFO)) << 8;//&0xFF) << 6;
+    PUT32(BSC0_S, CLEAR_STATUS);
+    PUT32(BSC0_FIFO, 0x00);
+    PUT32(BSC0_C, START_WRITE);
+    wait_i2c_done();
+    PUT32(BSC0_S, CLEAR_STATUS);
+    PUT32(BSC0_C, START_READ);
+    wait_i2c_done();
+    magnitude |= (GET32(BSC0_FIFO)); //&0x3F);
+    hexstring(magnitude);
+    puts("\n\r");
+    usleep(200);
+  }
 }
 //------------------------------------------------------------------------
 int notmain ( unsigned int earlypc )
 {
-  unsigned int ra;
+  int ra;
   unsigned int i, j;
-  unsigned int angle, magnitude;
-  char output_buf[100];
-
-  /* Set initial position to 0 */
-  x=0;
-  dir = 1;
+  unsigned int v;
 
   /* clear the pins to stop the motor from running */
   PIN_CLR(7);
   PIN_CLR(8);
+
+  /* Set initial position to 0 */
+  x=0;
+  /* Set initial direction to 0 (stopped) */
+  dir = 0;
+  /* Clear time ring buffer */
+  t_head = 0;
+  for(i=0; i<T_BUFFER_SIZE; i++)
+    t[i] = 0;
 
   gpio_init();
   pwm_init();
@@ -109,137 +285,48 @@ int notmain ( unsigned int earlypc )
   //which bootloader you used you might have some stuff show up in the
   //rx fifo.
   uart_flush_rx_fifo();
-  
-  while(1) {
-    puts("> ");
-    ra=uart_getc();
-    switch(ra) {
-    case 'p':
-      puts("Enter pwm duty cycle 0-100: ");
-      power = uart_read_int();
-      if (power > 100)
-	puts("Invalid duty cycle.\n\r");
-      else
-	pwm_set(power);
-      // Move right 100 ticks
-    case 'g': 
-      PIN_SET(7);
-      dir = 1;
-      puts("start\n\r");
-      PUT32(GPREN0, GET32(GPREN0)|(1<<17));
-      i=x+100;
-      j=0;
-      while(x<i) {
-	  j++;
-	  usleep(1);
-	  if (j>100) break;
-      }
-      puts("done\n\r");
-      hexstring(i);
-      hexstring(x); 
-      PIN_CLR(7);
-      break;
-      // Move left 100 ticks
-    case 'G':
-      PIN_SET(8);
-      dir = -1;
-      puts("start\n\rw");
-      PUT32(GPREN0, GET32(GPREN0)|(1<<17));
-      i=x-100;
-      j=0;
-      while(x>i) {
-	  j++;
-	  usleep(1);
-	  if (j>100) break;
-      }
-      puts("done\n\r");
-      hexstring(i);
-      hexstring(x); 
-      PIN_CLR(8);
-      break;
-      // I2C commands
-    case 'i':
-      while(GET32(BSC0_S) & BSC_S_RXD) {
-	GET32(BSC0_FIFO);
-      };
-      puts("Starting i2c test\n\r");
-      puts("Initial i2c status: "); hexstring(GET32(BSC0_S));
-      puts("\n\r");
-      PUT32(BSC0_S, CLEAR_STATUS); // Reset status bits (see #define)
-      PUT32(BSC0_A, 1<<6);
-      PUT32(BSC0_DLEN, 1);
-      PUT32(BSC0_FIFO, 0xFA);
-                
-      puts("I2C status after reset: "); hexstring(GET32(BSC0_S));
-
-      PUT32(BSC0_C, START_WRITE);    // Start Write (see #define)
-      wait_i2c_done();
-
-      puts("Finished writing\n\r");
-      puts("I2C status: ");
-      hexstring(GET32(BSC0_S));
-
-      PUT32(BSC0_DLEN, 1);
-      PUT32(BSC0_S, CLEAR_STATUS); // Reset status bits (see #define)
-      PUT32(BSC0_C, START_READ);    // Start Read after clearing FIFO (see #define)
-      wait_i2c_done();
-
-      puts("Read: "); hexstring(GET32(BSC0_FIFO));
-      break;
-    case 'I':
-      while(GET32(BSC0_S) & BSC_S_RXD) {
-	GET32(BSC0_FIFO);
-      };
-      PUT32(BSC0_A, 1<<6);
-      PUT32(BSC0_DLEN, 1);
-      puts("Reading magnet angle position in a loop\n\rUse 'q' to interrupt\n\r");
-      while(1){
-	// Read angle
-	PUT32(BSC0_S, CLEAR_STATUS);
-	PUT32(BSC0_FIFO, 0xFB);
-	PUT32(BSC0_C, START_WRITE);
-	wait_i2c_done();
-	PUT32(BSC0_S, CLEAR_STATUS);
-	PUT32(BSC0_C, START_READ);
-	wait_i2c_done();
-	angle = (GET32(BSC0_FIFO)) << 8; //&0xFF) << 6;
-	PUT32(BSC0_S, CLEAR_STATUS);
-	PUT32(BSC0_FIFO, 0xFC);
-	PUT32(BSC0_C, START_WRITE);
-	wait_i2c_done();
-	PUT32(BSC0_S, CLEAR_STATUS);
-	PUT32(BSC0_C, START_READ);
-	wait_i2c_done();
-	angle |= (GET32(BSC0_FIFO)); //&0x3F);
-	hexstring(angle);
-	//Read magnitude
-	PUT32(BSC0_S, CLEAR_STATUS);
-	PUT32(BSC0_FIFO, 0xFF);
-	PUT32(BSC0_C, START_WRITE);
-	wait_i2c_done();
-	PUT32(BSC0_S, CLEAR_STATUS);
-	PUT32(BSC0_C, START_READ);
-	wait_i2c_done();
-	magnitude = (GET32(BSC0_FIFO)) << 8;//&0xFF) << 6;
-	PUT32(BSC0_S, CLEAR_STATUS);
-	PUT32(BSC0_FIFO, 0x00);
-	PUT32(BSC0_C, START_WRITE);
-	wait_i2c_done();
-	PUT32(BSC0_S, CLEAR_STATUS);
-	PUT32(BSC0_C, START_READ);
-	wait_i2c_done();
-	magnitude |= (GET32(BSC0_FIFO)); //&0x3F);
-	hexstring(magnitude);
-	puts("\n\r");
-	usleep(200);
-      }
-    default:
-      puts("unrecognized command : "); uart_putc(ra);
-      puts("\n\r");
+  if(NOW_TIME() - t[t_head] > 1000)
+    {
+      dir = 0;
+      set_motor_voltage(0);
+      puts("stall detected\n\r");
     }
-            
-  }
+  puts("\n\r> ");
 
+  while(1) {
+    ra=uart_getc_nb();
+    if(ra>=0)
+      switch(ra) {
+      case 'r':
+	reset_x();
+	break;
+      case 'm':
+	move_to_limit(1);
+	break;
+      case 'M':
+	move_to_limit(-1);
+	break;
+      case 'p':
+	puts("Enter pwm duty cycle 0-100: ");
+	v = uart_read_int();
+	set_motor_voltage(v);
+	break;
+	// Move right 100 ticks
+      case 'g': move(1, 100);
+	break;
+	// Move left 100 ticks
+      case 'G': move(-1, 100);
+	break;
+	// I2C commands
+      case 'i': i2c1();
+	break;
+      case 'I': i2c2();
+	break;
+      default:
+	puts("unrecognized command : "); uart_putc(ra); hexstrings(ra);
+	puts("\n\r> ");
+      }            
+  }
 
   return(0);
 }
