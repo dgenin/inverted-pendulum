@@ -95,11 +95,13 @@ int uart_getc_nb ( void )
 unsigned int uart_read_int( void ) {
   unsigned int ret = 0;
   unsigned int next_digit = 0;
+
+  ret = 0;
   while(10*ret < (1<<32)-1)
     {
       next_digit = uart_getc();
-      if (next_digit - 30 > 0 && next_digit - 30 < 9)
-	ret = 10*ret + next_digit;
+      if ((next_digit - 0x30) >= 0 && (next_digit - 0x30) <= 9)
+	ret = 10*ret + (next_digit-0x30);
       else
 	return ret;
     }

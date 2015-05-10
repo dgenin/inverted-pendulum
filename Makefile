@@ -25,7 +25,7 @@ driver.o : driver.c
 	$(ARMGNU)-gcc $(COPS) -c driver.c -o driver.o
 
 driver.elf : memmap vectors.o driver.o 
-	$(ARMGNU)-ld vectors.o driver.o -T memmap -o driver.elf
+	$(ARMGNU)-ld vectors.o driver.o -g -T memmap -o driver.elf
 	$(ARMGNU)-objdump -D driver.elf > driver.list
 
 driver.bin : driver.elf
@@ -41,7 +41,7 @@ LOPS = -Wall -m32 -emit-llvm
 LLCOPS = -march=arm -mcpu=arm1176jzf-s
 LLCOPS0 = -march=arm 
 LLCOPS1 = -march=arm -mcpu=arm1176jzf-s
-COPS = -Wall  -O2 -nostdlib -nostartfiles -ffreestanding
+COPS = -Wall  -O2 -nostdlib -nostartfiles -ffreestanding -g
 OOPS = -std-compile-opts
 
 clang : driver.clang.hex driver.clang.bin

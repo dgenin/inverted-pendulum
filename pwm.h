@@ -8,7 +8,8 @@ void usleep( unsigned int ms )
 {
   unsigned int t0 = GET32(TIMER_CLO);
   //assuming 1Mhz clock
-  while (GET32(TIMER_CLO) < t0 + 1000*ms) {}
+  while (GET32(TIMER_CLO) < (t0 + 1000*ms)) 
+    {}
 }
 //------------------------------------------------------------------------
 void pwm_init(void){
