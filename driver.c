@@ -8,7 +8,7 @@
 #define T_BUFFER_SIZE 10
 #define X_BUFFER_SIZE 10
 #define STALL_TIMEOUT 250000 //in microseonds
-#define CENTER 0x5A00
+#define CENTER 0x5D00
 
 /* Global variables */
 int control_dir = 0; //Motor direction as determined by the control pins
@@ -394,7 +394,7 @@ void balance()
   /* d_error = 0; */
   /* correction = 0; */
 
-  decompose_angle(read_angle(), &a_prev, &dir_prev);
+  decompose_angle(read_angle()+x/0x80, &a_prev, &dir_prev);
   while(1)
     {
       angle = read_angle();
@@ -407,6 +407,7 @@ void balance()
       /* set_motor_voltage(-dir*correction/5); */
       /* motor_run(dir); */
 
+      angle += x/0x60;
       decompose_angle(angle, &a, &dir);
       if (a > 0x750)
 	{
@@ -417,9 +418,9 @@ void balance()
       //compensate for uncertainty in the CENTER angle
       //if the CENTER has not bee crossed and angle is getting closer to CENTER
       // and angle is small continue doing whatever we were doing
-      if ((dir_prev == dir) && (a < a_prev) && (a < 0x20))
-	continue;
-      volts = (a*a)/(0x190000/33)+67;
+      //if ((dir_prev == dir) && (a < a_prev) && (a < 0x20))
+      //continue;
+      volts = (a*a)/(0x190000/40)+66;
       //volts = abs_rel_angle/(0xef0/70)+70;
       hexstring(a);
       hexstring(a_prev);
