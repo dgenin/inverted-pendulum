@@ -1,6 +1,7 @@
 
 ARMGNU ?= arm-linux-gnueabi
 
+LDOPS = -L/usr/lib/gcc-cross/arm-linux-gnueabi/4.7/ -lstdlib
 COPS = -Wall -O2 -nostdlib -nostartfiles -ffreestanding -g
 #COPS = -Wall -O0 -nostdlib -nostartfiles -ffreestanding -g
 
@@ -21,11 +22,14 @@ clean :
 vectors.o : vectors.s
 	$(ARMGNU)-as vectors.s -o vectors.o
 
-driver.o : driver.c
+motor.o : motor.c driver.h
+	$(ARMGNU)-gcc $(COPS) -c motor.c -o motor.o
+
+driver.o : driver.c driver.h
 	$(ARMGNU)-gcc $(COPS) -c driver.c -o driver.o
 
-driver.elf : memmap vectors.o driver.o 
-	$(ARMGNU)-ld vectors.o driver.o -g -T memmap -o driver.elf
+driver.elf : memmap vectors.o driver.o motor.o
+	$(ARMGNU)-ld vectors.o motor.o driver.o -g -T memmap -o driver.elf
 	$(ARMGNU)-objdump -D driver.elf > driver.list
 
 driver.bin : driver.elf

@@ -4,6 +4,16 @@ extern void dummy ( unsigned int );
 
 #define PIN_CLR(pin) PUT32(GPCLR0, 1<<pin)
 #define PIN_SET(pin) PUT32(GPSET0, 1<<pin)
+#define NOW_TIME() GET32(TIMER_CLO)
+
+/* Timer control registers */
+#define TIMER_CS 0x20003000
+#define TIMER_CLO 0x20003004
+#define TIMER_C0 0x2000300C
+#define TIMER_C1 0x20003010
+#define TIMER_C2 0x20003014
+#define TIMER_C3 0x20003018
+
 
 /* GPIO control registers */
 #define GPFSEL0     0x20200000

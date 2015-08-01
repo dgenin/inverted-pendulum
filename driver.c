@@ -2,27 +2,16 @@
 #include "uart.h"
 #include "pwm.h"
 #include "i2c.h"
+void enable_irq(void);
 
-#define NOW_TIME() GET32(TIMER_CLO)
+#define ABROAD
+#include "driver.h"
+#undef ABROAD
 
-#define T_BUFFER_SIZE 10
-#define X_BUFFER_SIZE 10
-#define STALL_TIMEOUT 250000 //in microseonds
-#define CENTER 0x5D00
+#define CENTER 0x5CB8
 
-/* Global variables */
-int control_dir = 0; //Motor direction as determined by the control pins
-                     //Should only be modified in motor_run() and motor_stop()
-unsigned int volts = 0; //Motor power
-int speed = 0; //Current carriage speed
-int limit = 0; //Half length of the track in ticks, center of the track is 0
-unsigned int p1,p2;
-
-/* Globals updated in the tick ISR */
-volatile int x; //Current position ring buffer in units of ticks ~ .005"
-volatile unsigned int t[T_BUFFER_SIZE]; //Ring buffer for tick times
-volatile unsigned int t_head; //Current head of the ring buffer
-volatile int carriage_dir = 0; //Carriage direction as seen by the sensor
+volatile unsigned int timer_test;
+volatile unsigned int timer_next;
 
 /* Dummy function to stop compiler from optimizing trivial loops */
 extern void dummy ( unsigned int );
@@ -91,11 +80,13 @@ void gpio_init (void) {
    
 
 //------------------------------------------------------------------------
-void c_irq_handler()
+static void position_irq_handler()
 {
+  unsigned int t0, t1;
+  t0 = t[t_head]; //Last time step
   /* Record the current tick time in tick time buffer */
   t_head = (t_head + 1) % T_BUFFER_SIZE;
-  t[t_head] = GET32(TIMER_CLO);
+  t1 = t[t_head] = GET32(TIMER_CLO);
   /* Detect direction of the carriage motion based on the
    * second channel's level 
    */
@@ -105,13 +96,37 @@ void c_irq_handler()
   /* Clear edge detect interrupt flag.
    * Should be last to avoid (the very unlikely) ISR reentry.
    */
+  if(target_speed != 0)
+    {
+      if ((t1 - t0) > target_speed)
+	set_motor_voltage(100);
+      else
+	set_motor_voltage(70);
+    }
   PUT32(GPEDS0, 1<<17);
+}
+//------------------------------------------------------------------------
+static void timer_irq_handler()
+{
+  timer_test++;
+  timer_next += 0x2000;
+  PUT32(TIMER_C1, timer_next);
+  PUT32(TIMER_CS, 2);
+}
+//------------------------------------------------------------------------
+void c_irq_handler()
+{
+  if(GET32(TIMER_CS)&2)
+    timer_irq_handler();
+  //  else
+  //  position_irq_handler();
 }
 //------------------------------------------------------------------------
 /* Process command line input*/
 void proccess_cmd(unsigned int cmd)
 {
 }
+//------------------------------------------------------------------------
 /* Set motor voltage */
 void set_motor_voltage(unsigned int duty_cycle)
 {
@@ -120,90 +135,6 @@ void set_motor_voltage(unsigned int duty_cycle)
     else if (duty_cycle < 0)
       duty_cycle = 0;
   pwm_set(duty_cycle);
-}
-//------------------------------------------------------------------------
-/* Pins 7 and 8 should only be manipulated in motor_run and motor_stop */
-void motor_run(int direction)
-{
-  if (control_dir == direction)
-    return;
-  if (1 == direction)
-    {
-      control_dir = 1;
-      PIN_CLR(7);
-      PIN_SET(8);
-    }
-  else if (-1 == direction)
-    {
-      control_dir = -1;
-      PIN_CLR(8);
-      PIN_SET(7);
-    }
-}
-//------------------------------------------------------------------------
-void motor_stop()
-{
-  PIN_SET(7);
-  PIN_SET(8);
-  control_dir = 0;
-}
-void motor_stop1()
-{
-  PIN_CLR(7);
-  PIN_CLR(8);
-  control_dir = 0;
-}
-//------------------------------------------------------------------------
-void move_to_limit(int direction)
-{
-  unsigned start_head;
-
-  start_head = t_head;
-  set_motor_voltage(75);
-  motor_run(direction);
-  
-  while(t_head == start_head)
-    ;
-  while(((NOW_TIME() - t[t_head]) < STALL_TIMEOUT) || ((NOW_TIME() - t[t_head]) < STALL_TIMEOUT))
-    ;
-  motor_stop();
-  hexstring(x);
-  //hexstring(t[t_head]);
-  //hexstring(NOW_TIME());
-}
-//------------------------------------------------------------------------
-void move(int direction, int ticks)
-{
-  int i,j;
-
-  //puts("move\n\r");
-  i = x + direction*ticks;
-  j = 0;
-  motor_run(direction);
-  while((direction*(x-i))<0) {
-    //TODO: Figure out why the stall check fails closed like a valve
-    /*if(!(((NOW_TIME() - t[t_head]) < STALL_TIMEOUT) || ((NOW_TIME() - t[t_head]) < STALL_TIMEOUT)))
-      {
-	puts("stalled\n\r");
-	break;
-      }
-    */
-    j++;
-    usleep(1);
-    //if (j>ticks) break;
-  }
-  motor_stop();
-  //puts("done\n\r");
-  //hexstring(i);
-  //hexstring(x);
-}
-//------------------------------------------------------------------------
-void move_to(int position)
-{
-  if (x>position)
-    move(-1, x-position);
-  else
-    move(1, position-x);
 }
 //------------------------------------------------------------------------
 void print_x()
@@ -281,7 +212,10 @@ void calibrate()
     {
       set_motor_voltage(i);
       t0 = NOW_TIME();
-      move(1 - 2*(i%2), 200);
+      //move(1 - 2*(i%2), 200);
+      motor_run(1);
+      usleep(3000);
+      motor_stop();
       puts("\n\r");
       hexstring(i);
       hexstring(NOW_TIME()-t0);
@@ -329,37 +263,10 @@ void calibrate()
 //    set_motor_voltage(;
 //  else
 //    adfasdf;
+// 
+// Horizontal velocity of the top of the pendulum. Approximately equal to
+// radial velocity times the length of the pendulum for small angles.
 //------------------------------------------------------------------------
-void balance_debug()
-{
-  //Smaller angle values left of CENTER, i.e., angle increases in the clockwise direction
-  unsigned int angle;
-  int dir;
-  dir = 0;
-
-  while(1)
-    {
-      angle = read_angle();
-      if (angle > 0x9000)
-	break;
-      if (angle < CENTER)
-	{
-	  volts = (CENTER-angle);//p1;
-	  volts = volts;///p2;
-	  dir = 1;
-	}
-      else
-	{
-	  volts = (angle-CENTER);///p1;
-	  volts = volts;//p2;
-	  dir = -1;
-	}
-      hexstring(volts);
-      hexstring(dir);
-      usleep(500);
-    }
-}
-
 void decompose_angle(unsigned int angle, int *abs_dev, int *dir)
 {
   if (angle < CENTER)
@@ -372,15 +279,17 @@ void decompose_angle(unsigned int angle, int *abs_dev, int *dir)
       *abs_dev = (angle-CENTER);
       *dir = -1;
     }
-}  
-
+}
+//------------------------------------------------------------------------
 void balance()
 {
   //Smaller angle values left of CENTER, i.e., angle increases in the clockwise direction
   unsigned int angle, angle_prev;
+  unsigned int time, time_prev;
   unsigned int a_prev, a;
   int dir, dir_prev = 0;
-  //  int correction, p_error, last_p_error, dir, d_error, i_error;
+  float w; //Angular velocity of the pendulum
+  float v; //Velocity of the carriage
   
   set_motor_voltage(75);
   move_to(0);
@@ -389,25 +298,14 @@ void balance()
   //reset_x();
   //limit  = 0;
 
-  /* last_p_error = 0; */
-  /* i_error = 0; */
-  /* d_error = 0; */
-  /* correction = 0; */
-
-  decompose_angle(read_angle()+x/0x80, &a_prev, &dir_prev);
+  decompose_angle(((int)read_angle())-(x/0x8), &a_prev, &dir_prev);
+  time = time_prev = NOW_TIME();
   while(1)
     {
       angle = read_angle();
-      /* p_error = angle - CENTER; */
-      /* d_error = last_p_error - p_error; */
-      /* i_error += p_error;  */
-      /* correction = p_error + d_error + i_error; */
-      /* control_dir = (correction > 0) ? -1 : 1; */
-      /* last_p_error = p_error; */
-      /* set_motor_voltage(-dir*correction/5); */
-      /* motor_run(dir); */
-
-      angle += x/0x60;
+      time = NOW_TIME();
+      w = (angle - angle_prev)/(float)(time - time_prev);
+      v = 1/(float) (time - time_prev);
       decompose_angle(angle, &a, &dir);
       if (a > 0x750)
 	{
@@ -415,19 +313,14 @@ void balance()
 	  puts("Reached critical angle\r\n");
 	  break;
 	} 
-      //compensate for uncertainty in the CENTER angle
-      //if the CENTER has not bee crossed and angle is getting closer to CENTER
-      // and angle is small continue doing whatever we were doing
-      //if ((dir_prev == dir) && (a < a_prev) && (a < 0x20))
-      //continue;
-      volts = (a*a)/(0x190000/40)+66;
+      volts = (a*a)/(0x190000/20)+68;//(a*a)/(0x190000/40)+66;
       //volts = abs_rel_angle/(0xef0/70)+70;
-      hexstring(a);
-      hexstring(a_prev);
-      hexstring(dir);
-      hexstring(dir_prev);
-      hexstring(volts);
-      puts("-----------------\r\n");
+      //hexstring(angle);
+      //hexstring(a_prev);
+      //hexstring(dir);
+      //hexstring(dir_prev);
+      //hexstring(volts);
+      //puts("-----------------\r\n");
       set_motor_voltage(volts);
       motor_run(dir);
 
@@ -437,16 +330,52 @@ void balance()
 	  puts("hit limit\n\r");
 	  return;
 	}
-      usleep(1);
+      //usleep(1);
       a_prev = a;
       dir_prev = dir;
     }
+}
+//------------------------------------------------------------------------
+void speed_test(void)
+{
+  unsigned int time, time_prev;
+  int direction;
+
+  puts("in speed test\n");
+  direction = 1;
+  target_speed = 200;
+  motor_run(direction);
+  time = time_prev = NOW_TIME();
+  while(1)
+    {
+     if (x > limit)
+       {
+       direction = -1;
+       time = NOW_TIME();
+       hexstring(time - time_prev);
+       time_prev = time;
+       }
+     if (x < -limit)
+       direction = 1;
+     motor_run(direction);
+     //usleep(10);
+     //hexstring(x);
+     if(uart_getc_nb()>=0) break;
+    }
+  target_speed = 0;
+  motor_stop();
 }
 //------------------------------------------------------------------------
 int notmain ( unsigned int earlypc )
 {
   int ra;
   unsigned int i, j;
+  control_dir = 0;
+  volts = 0;
+  carriage_dir = 0;
+  speed = 0;
+  limit = 0;
+  target_speed = 0;
 
   /* Reset motor control pins and zero out control_dir */
   motor_stop();
@@ -462,12 +391,17 @@ int notmain ( unsigned int earlypc )
   i2c_init();
   hexstring(0x87654321);
   
+  timer_test = 0;
+  timer_next = NOW_TIME() + 0x200;
+  PUT32(TIMER_CS, 2);
+  PUT32(TIMER_C1, timer_next);
+  
   //PUT32(IRQ_ENABLE2, 0);
   //PUT32(IRQ_ENABLE1, 0);
   /* Enable IRQ 49 for edge detection on gpio 17 */ 
-  PUT32(IRQ_ENABLE2, 1<<(49-32));
+  PUT32(IRQ_ENABLE2, (1<<(49-32))|(1<<1));
   enable_irq();
-    
+
   //probably a better way to flush the rx fifo.  depending on if and
   //which bootloader you used you might have some stuff show up in the
   //rx fifo.
@@ -487,14 +421,15 @@ int notmain ( unsigned int earlypc )
     ra=uart_getc_nb();
     if(ra>=0)
       switch(ra) {
+      case 't':
+	hexstring(timer_test);
+	break;
       case 'c':
 	calibrate();
 	break;
-      case 'd':
-	balance_debug();
-	break;
       case 'b':
-	balance();
+	//balance();
+	speed_test();
 	break;
       case 'r':
 	reset_x();
@@ -534,7 +469,13 @@ int notmain ( unsigned int earlypc )
 	hexstring(p2);
 	break;
       default:
-	puts("unrecognized command : "); uart_putc(ra); hexstrings(ra);
+	puts("unrecognized command : ");
+	if(ra != '\n' && ra != '\r') {
+	  uart_putc(ra);
+	  puts(", ");
+	}
+	puts("hex=");
+	hexstrings(ra);
 	puts("\n\r> ");
       }            
   }

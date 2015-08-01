@@ -40,6 +40,6 @@ void pwm_init(void){
 void pwm_set(unsigned int duty_cycle)
 {
   PUT32(PWM_DAT1, duty_cycle);
-  usleep(10);
+  //usleep(10);
   PUT32(PWM_CTL, GET32(PWM_CTL) | 1);
 }
