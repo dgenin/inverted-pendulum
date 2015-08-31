@@ -108,8 +108,10 @@ static void position_irq_handler()
 //------------------------------------------------------------------------
 static void timer_irq_handler()
 {
-  timer_test++;
-  timer_next += 0x2000;
+  static unsigned int prev_time;
+  timer_test = NOW_TIME() - prev_time;
+  prev_time = NOW_TIME();
+  timer_next = timer_next + 1000;
   PUT32(TIMER_C1, timer_next);
   PUT32(TIMER_CS, 2);
 }
@@ -395,12 +397,17 @@ int notmain ( unsigned int earlypc )
   timer_next = NOW_TIME() + 0x200;
   PUT32(TIMER_CS, 2);
   PUT32(TIMER_C1, timer_next);
+  hexstring(0x1);
+
   
   //PUT32(IRQ_ENABLE2, 0);
   //PUT32(IRQ_ENABLE1, 0);
   /* Enable IRQ 49 for edge detection on gpio 17 */ 
-  PUT32(IRQ_ENABLE2, (1<<(49-32))|(1<<1));
+  PUT32(IRQ_ENABLE2, (1<<(49-32)));
+  PUT32(IRQ_ENABLE1, (1<<1));
+  hexstring(0x2);
   enable_irq();
+  hexstring(0x3);
 
   //probably a better way to flush the rx fifo.  depending on if and
   //which bootloader you used you might have some stuff show up in the
@@ -422,7 +429,12 @@ int notmain ( unsigned int earlypc )
     if(ra>=0)
       switch(ra) {
       case 't':
-	hexstring(timer_test);
+	{
+	  static unsigned int t_old;
+	  hexstring(timer_test);
+	  timer_test = 0;
+	  t_old = timer_test;
+	}
 	break;
       case 'c':
 	calibrate();
