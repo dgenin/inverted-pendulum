@@ -9,7 +9,7 @@ void enable_irq(void);
 #undef ABROAD
 
 #define CENTER 0x5CB8
-
+#define TIMER_INTERVAL 1000
 volatile unsigned int timer_test;
 volatile unsigned int timer_next;
 
@@ -73,7 +73,8 @@ void gpio_init (void) {
 
   //enable rising edge detection
   //on gpio 17
-  PUT32(GPREN0, (1<<17));
+  PUT32(GPFEN0, (1<<17));
+  PUT32(GPREN0, 0);
   //PUT32(GPFEN0, (1<<18)|(1<<17));
   //PUT32(GPEDS0, (1<<17));
 }
@@ -83,14 +84,15 @@ void gpio_init (void) {
 static void position_irq_handler()
 {
   unsigned int t0, t1;
-  t0 = t[t_head]; //Last time step
-  /* Record the current tick time in tick time buffer */
-  t_head = (t_head + 1) % T_BUFFER_SIZE;
-  t1 = t[t_head] = GET32(TIMER_CLO);
   /* Detect direction of the carriage motion based on the
    * second channel's level 
    */
-  carriage_dir = (GET32(GPLEV0)&(1<<9)) ? 1 : -1;
+  carriage_dir = (GET32(GPLEV0)&(1<<9)) ? -1 : 1;
+  //Last time step
+  t0 = t[t_head];
+  /* Record the current tick time in tick time buffer */
+  t_head = (t_head + 1) % T_BUFFER_SIZE;
+  t1 = t[t_head] = GET32(TIMER_CLO);
   /* Increament position according to direction of motion */
   x += carriage_dir;
   /* Clear edge detect interrupt flag.
@@ -111,17 +113,33 @@ static void timer_irq_handler()
   static unsigned int prev_time;
   timer_test = NOW_TIME() - prev_time;
   prev_time = NOW_TIME();
-  timer_next = timer_next + 1000;
+  timer_next = timer_next + TIMER_INTERVAL;
   PUT32(TIMER_C1, timer_next);
   PUT32(TIMER_CS, 2);
 }
 //------------------------------------------------------------------------
 void c_irq_handler()
 {
+  unsigned int irq_basic, irq_pending1, irq_pending2;
+  irq_basic = GET32(IRQ_BASIC);
+  if (irq_basic & (1 << 8)) {
+    irq_pending1 = GET32(IRQ_PEND1);
+    if (irq_pending1 & (1 << 1))
+      timer_irq_handler();
+  }
+
+  if (irq_basic & (1 << 9)) {
+    irq_pending2 = GET32(IRQ_PEND2);
+    if (irq_pending2 & (1 << (49 - 32)))
+      position_irq_handler();
+  }
+
+#if 0
   if(GET32(TIMER_CS)&2)
     timer_irq_handler();
-  //  else
-  //  position_irq_handler();
+  else
+    position_irq_handler();
+#endif
 }
 //------------------------------------------------------------------------
 /* Process command line input*/
@@ -152,12 +170,12 @@ void reset_x()
 //------------------------------------------------------------------------
 void homing()
 {
-  move_to_limit(-1);
-  reset_x();
   move_to_limit(1);
-  limit = x/2;
+  reset_x();
+  move_to_limit(-1);
+  limit = -x/2;
   hexstring(limit);
-  move(-1, limit);
+  move(1, limit);
   reset_x();
   limit -= 200;
 }
@@ -345,7 +363,7 @@ void speed_test(void)
 
   puts("in speed test\n");
   direction = 1;
-  target_speed = 200;
+  target_speed = 5000;
   motor_run(direction);
   time = time_prev = NOW_TIME();
   while(1)
@@ -354,11 +372,12 @@ void speed_test(void)
        {
        direction = -1;
        time = NOW_TIME();
-       hexstring(time - time_prev);
        time_prev = time;
        }
-     if (x < -limit)
+     if (x < -limit) {
        direction = 1;
+       hexstring(x);
+     }
      motor_run(direction);
      //usleep(10);
      //hexstring(x);
@@ -394,9 +413,6 @@ int notmain ( unsigned int earlypc )
   hexstring(0x87654321);
   
   timer_test = 0;
-  timer_next = NOW_TIME() + 0x200;
-  PUT32(TIMER_CS, 2);
-  PUT32(TIMER_C1, timer_next);
   hexstring(0x1);
 
   
@@ -406,6 +422,9 @@ int notmain ( unsigned int earlypc )
   PUT32(IRQ_ENABLE2, (1<<(49-32)));
   PUT32(IRQ_ENABLE1, (1<<1));
   hexstring(0x2);
+  timer_next = NOW_TIME() + TIMER_INTERVAL;
+  PUT32(TIMER_CS, 2);
+  PUT32(TIMER_C1, timer_next);
   enable_irq();
   hexstring(0x3);
 
