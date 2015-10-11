@@ -98,12 +98,24 @@ static void position_irq_handler()
   /* Clear edge detect interrupt flag.
    * Should be last to avoid (the very unlikely) ISR reentry.
    */
+  v = t1 - t0;
   if(target_speed != 0)
     {
-      if ((t1 - t0) > target_speed)
-	set_motor_voltage(100);
+#if 0
+      int error = target_speed - v;
+      static unsigned int new_voltage = 90;
+      new_voltage -= error/100;
+      if (new_voltage > 100)
+	new_voltage = 100;
+      else if (new_voltage < 70)
+	new_voltage = 70;
+      set_motor_voltage(new_voltage);	  
+#else
+      if (v > target_speed)
+	set_motor_voltage(90);
       else
 	set_motor_voltage(70);
+#endif
     }
   PUT32(GPEDS0, 1<<17);
 }
@@ -358,14 +370,15 @@ void balance()
 //------------------------------------------------------------------------
 void speed_test(void)
 {
-  unsigned int time, time_prev;
+  unsigned int time, time_prev, print_counter;
   int direction;
 
   puts("in speed test\n");
   direction = 1;
-  target_speed = 5000;
+  target_speed = 250;
   motor_run(direction);
   time = time_prev = NOW_TIME();
+  print_counter = 0;
   while(1)
     {
      if (x > limit)
@@ -376,11 +389,15 @@ void speed_test(void)
        }
      if (x < -limit) {
        direction = 1;
-       hexstring(x);
+       //hexstring(x);
      }
      motor_run(direction);
      //usleep(10);
      //hexstring(x);
+     if (print_counter % 1000000)
+       hexstring(v);
+     print_counter++;
+
      if(uart_getc_nb()>=0) break;
     }
   target_speed = 0;
@@ -427,6 +444,7 @@ int notmain ( unsigned int earlypc )
   PUT32(TIMER_C1, timer_next);
   enable_irq();
   hexstring(0x3);
+  hexstring(t);
 
   //probably a better way to flush the rx fifo.  depending on if and
   //which bootloader you used you might have some stuff show up in the
