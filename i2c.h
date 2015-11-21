@@ -14,9 +14,9 @@ void i2c_init() {
 
 int wait_i2c_done() {
   //Wait till done, let's use a timeout just in case
-  int timeout = 200;
+  int timeout = 2000000;
   while((!(GET32(BSC0_S) & BSC_S_DONE)) && --timeout) {
-    usleep(5);
+    //usleep(1);
   }
   if(timeout == 0)
     return 1;

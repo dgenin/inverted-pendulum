@@ -84,15 +84,17 @@ void gpio_init (void) {
 static void position_irq_handler()
 {
   unsigned int t0, t1;
+  unsigned int v_head;
   /* Detect direction of the carriage motion based on the
    * second channel's level 
    */
+  v_head = t_head;
   carriage_dir = (GET32(GPLEV0)&(1<<9)) ? -1 : 1;
   //Last time step
   t0 = t[t_head];
   /* Record the current tick time in tick time buffer */
   t_head = (t_head + 1) % T_BUFFER_SIZE;
-  t1 = t[t_head] = GET32(TIMER_CLO);
+  t1 = t[t_head] = GET32(TIMER_CLO); 
   /* Increament position according to direction of motion */
   x += carriage_dir;
   /* Clear edge detect interrupt flag.
@@ -111,10 +113,15 @@ static void position_irq_handler()
 	new_voltage = 70;
       set_motor_voltage(new_voltage);	  
 #else
-      if (v > target_speed)
+      if (v > target_speed) {
+	motor_voltage[v_head] = 90;
 	set_motor_voltage(90);
-      else
+      }
+      else {
+	motor_voltage[v_head] = 70;
 	set_motor_voltage(70);
+      }
+      
 #endif
     }
   PUT32(GPEDS0, 1<<17);
@@ -445,6 +452,7 @@ int notmain ( unsigned int earlypc )
   enable_irq();
   hexstring(0x3);
   hexstring(t);
+  hexstring(motor_voltage);
 
   //probably a better way to flush the rx fifo.  depending on if and
   //which bootloader you used you might have some stuff show up in the
