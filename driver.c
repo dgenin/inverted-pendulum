@@ -120,8 +120,7 @@ static void position_irq_handler()
       else {
 	motor_voltage[v_head] = 70;
 	set_motor_voltage(70);
-      }
-      
+      }      
 #endif
     }
   PUT32(GPEDS0, 1<<17);
@@ -322,58 +321,110 @@ void decompose_angle(unsigned int angle, int *abs_dev, int *dir)
 //------------------------------------------------------------------------
 void balance()
 {
-  //Smaller angle values left of CENTER, i.e., angle increases in the clockwise direction
-  unsigned int angle, angle_prev;
-  unsigned int time, time_prev;
-  unsigned int a_prev, a;
-  int dir, dir_prev = 0;
-  float w; //Angular velocity of the pendulum
-  float v; //Velocity of the carriage
-  
+  unsigned int angle, angle_prev; //Current and previous raw angle sensor readings
+  unsigned int time, time_prev; //Current and last angle sensor readings timestamps
+  unsigned int a, a_dir; //Absolute value of angle relative to vertical position and direction
+  unsigned int w; //Angular velocity of the pendulum
+  int dir; //Direction to run the carriage in
+
+  //This turns off the speed control loop in the OE ISR 
+  target_speed = 0;
   set_motor_voltage(75);
   move_to(0);
   uart_getc();
-  // For testing without running the motor
-  //reset_x();
-  //limit  = 0;
 
-  decompose_angle(((int)read_angle())-(x/0x8), &a_prev, &dir_prev);
-  time = time_prev = NOW_TIME();
+  //Initialize control loop variables
+  time_prev = NOW_TIME();
+  dir = 0;
   while(1)
     {
       angle = read_angle();
       time = NOW_TIME();
-      w = (angle - angle_prev)/(float)(time - time_prev);
-      v = 1/(float) (time - time_prev);
+      w = (angle - angle_prev)/(time - time_prev);
+      hexstring(w);
+      time_prev = time;
+
+      //Stop if the angle is to large
       decompose_angle(angle, &a, &dir);
       if (a > 0x750)
 	{
 	  motor_stop();
 	  puts("Reached critical angle\r\n");
 	  break;
-	} 
-      volts = (a*a)/(0x190000/20)+68;//(a*a)/(0x190000/40)+66;
-      //volts = abs_rel_angle/(0xef0/70)+70;
-      //hexstring(angle);
-      //hexstring(a_prev);
-      //hexstring(dir);
-      //hexstring(dir_prev);
-      //hexstring(volts);
-      //puts("-----------------\r\n");
-      set_motor_voltage(volts);
-      motor_run(dir);
-
-      if ((x > limit) || (x < -limit))
-	{
-	  motor_stop();
-	  puts("hit limit\n\r");
-	  return;
 	}
-      //usleep(1);
-      a_prev = a;
-      dir_prev = dir;
+
+      if(w > -0x10) {
+	set_motor_voltage(90);
+	motor_run(1);
+      } else
+	if(w < 0x10) {
+	  set_motor_voltage(90);
+	  motor_run(-1);
+	}
     }
 }
+//------------------------------------------------------------------------
+/* void balance() */
+/* { */
+/*   //Smaller angle values left of CENTER, i.e., angle increases in the clockwise direction */
+/*   unsigned int angle, angle_prev; */
+/*   unsigned int time, time_prev; */
+/*   unsigned int a_prev, a; */
+/*   int dir, dir_prev = 0; //Pendulum rotation sense +1 -> clockwise, -1 -> counterclockwise */
+/*   float w; //Angular velocity of the pendulum */
+/*   float v; //Velocity of the carriage */
+
+/*   target_speed = 0; */
+/*   set_motor_voltage(75); */
+/*   move_to(0); */
+/*   uart_getc(); */
+/*   // For testing without running the motor */
+/*   //reset_x(); */
+/*   //limit  = 0; */
+
+/*   //decompose_angle(((int)read_angle())-(x/0x8), &a_prev, &dir_prev); */
+/*   //decompose_angle(read_angle(), &a_prev, &dir_prev); */
+/*   time = time_prev = NOW_TIME(); */
+/*   while(1) */
+/*     { */
+/*       angle = read_angle(); */
+/*       time = NOW_TIME(); */
+/*       w = (angle - angle_prev)/(float)(time - time_prev); */
+/*       //Might get weird if t buffer gets updated during this computation */
+/*       v = 1/(float)(t[t_head] - t[t_head-1]); */
+/*       //v = 1/(float) (time - time_prev); */
+/*       time_prev = time; */
+/*       decompose_angle(angle, &a, &dir); */
+/*       if (a > 0x750) */
+/* 	{ */
+/* 	  motor_stop(); */
+/* 	  puts("Reached critical angle\r\n"); */
+/* 	  break; */
+/* 	}  */
+/*       volts = (a*a)/(0x190000/20)+70; */
+/*       if a < 0x10 && w >= -0x10 && carriage_dir > 0 */
+/*       //volts = (a*a)/(0x190000/40)+66; */
+/*       //volts = a/(0xef0/70)+70; */
+/*       //hexstring(angle); */
+/*       //hexstring(a_prev); */
+/*       //hexstring(dir); */
+/*       //hexstring(dir_prev); */
+/*       //hexstring(volts); */
+/*       //puts("-----------------\r\n"); */
+/*       set_motor_voltage(volts); */
+/*       motor_run(dir); */
+
+/*       if ((x > limit) || (x < -limit)) */
+/* 	{ */
+/* 	  motor_stop(); */
+/* 	  puts("hit limit\n\r"); */
+/* 	  return; */
+/* 	} */
+/*       //usleep(1); */
+/*       a_prev = a; */
+/*       dir_prev = dir; */
+/*     } */
+/* } */
 //------------------------------------------------------------------------
 void speed_test(void)
 {
@@ -485,8 +536,8 @@ int notmain ( unsigned int earlypc )
 	calibrate();
 	break;
       case 'b':
-	//balance();
-	speed_test();
+	balance();
+	//speed_test();
 	break;
       case 'r':
 	reset_x();

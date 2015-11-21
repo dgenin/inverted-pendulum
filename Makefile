@@ -1,7 +1,7 @@
 
 ARMGNU ?= arm-linux-gnueabi
 
-LDOPS = -L/usr/lib/gcc-cross/arm-linux-gnueabi/4.7/ -lstdlib
+LDOPS = -L/usr/lib/gcc/arm-linux-gnueabi/4.3.5/ -lstdlib
 COPS = -Wall -O2 -nostdlib -nostartfiles -ffreestanding -g
 #COPS = -Wall -O0 -nostdlib -nostartfiles -ffreestanding -g
 
