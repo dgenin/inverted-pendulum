@@ -1,8 +1,8 @@
 
 ARMGNU ?= arm-linux-gnueabi
 
-LDOPS = -L/usr/lib/gcc/arm-linux-gnueabi/4.3.5/ -lstdlib
-COPS = -Wall -O2 -nostdlib -nostartfiles -ffreestanding -g
+LDOPS = -L/usr/lib/gcc/arm-linux-gnueabi/4.3.5/ -lgcc
+COPS = -Wall -O2 -nostartfiles -ffreestanding -g --build-id=none
 #COPS = -Wall -O0 -nostdlib -nostartfiles -ffreestanding -g
 
 gcc : driver.hex driver.bin
@@ -25,11 +25,11 @@ vectors.o : vectors.s
 motor.o : motor.c driver.h
 	$(ARMGNU)-gcc $(COPS) -c motor.c -o motor.o
 
-driver.o : driver.c driver.h
+driver.o : driver.c driver.h uart.h
 	$(ARMGNU)-gcc $(COPS) -c driver.c -o driver.o
 
 driver.elf : memmap vectors.o driver.o motor.o
-	$(ARMGNU)-ld vectors.o motor.o driver.o -g -T memmap -o driver.elf
+	$(ARMGNU)-ld vectors.o motor.o driver.o -g -o driver.elf $(LDOPS) -T memmap
 	$(ARMGNU)-objdump -D driver.elf > driver.list
 
 driver.bin : driver.elf

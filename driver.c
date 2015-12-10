@@ -8,10 +8,16 @@ void enable_irq(void);
 #include "driver.h"
 #undef ABROAD
 
-#define CENTER 0x5CB8
+#define CENTER 0x5C80
 #define TIMER_INTERVAL 1000
 volatile unsigned int timer_test;
 volatile unsigned int timer_next;
+int da[10000], dt[10000];
+
+//Hack: couldn't get the ld to link the correct libc function
+void __div0(void)
+{
+}
 
 /* Dummy function to stop compiler from optimizing trivial loops */
 extern void dummy ( unsigned int );
@@ -324,8 +330,9 @@ void balance()
   unsigned int angle, angle_prev; //Current and previous raw angle sensor readings
   unsigned int time, time_prev; //Current and last angle sensor readings timestamps
   unsigned int a, a_dir; //Absolute value of angle relative to vertical position and direction
-  unsigned int w; //Angular velocity of the pendulum
+  int w; //Angular velocity of the pendulum
   int dir; //Direction to run the carriage in
+  int i;
 
   //This turns off the speed control loop in the OE ISR 
   target_speed = 0;
@@ -335,32 +342,48 @@ void balance()
 
   //Initialize control loop variables
   time_prev = NOW_TIME();
+  angle_prev = read_angle();
   dir = 0;
+  i = 0;
+  //puts("--------------\n\r");
+  //hexstring(&da);
+  //hexstring(&dt);
   while(1)
     {
       angle = read_angle();
       time = NOW_TIME();
-      w = (angle - angle_prev)/(time - time_prev);
-      hexstring(w);
+      w = (0x2000*(int)(angle - angle_prev))/(int)(time - time_prev);
+      //da[i % 10000] = angle - angle_prev;
+      //dt[i % 10000] = time - time_prev;
+      //i++;
+      angle_prev = angle;
       time_prev = time;
 
       //Stop if the angle is to large
       decompose_angle(angle, &a, &dir);
-      if (a > 0x750)
+      puts("--------------\n\r");
+      puts("angle: "); hexstring(angle);
+      puts("da:    "); hexstring_signed(angle - angle_prev);
+      puts("dt:    "); hexstring(time - time_prev);
+      puts("w:     "); hexstring_signed(w);
+      puts("a:     "); hexstring(a);
+      if(a > 0x750)
 	{
 	  motor_stop();
 	  puts("Reached critical angle\r\n");
 	  break;
 	}
-
-      if(w > -0x10) {
-	set_motor_voltage(90);
+      volts = (a*a)/(0x190000/10)+66;
+      set_motor_voltage(volts);
+      if(dir > 0 && a > 0x100 && w < -0x10) {
+	//set_motor_voltage(80);
 	motor_run(1);
-      } else
-	if(w < 0x10) {
-	  set_motor_voltage(90);
-	  motor_run(-1);
-	}
+      }
+      if(dir < 0 && a > 0x100 && w > 0x10) {
+	//set_motor_voltage(80);
+	motor_run(-1);
+      }
+      usleep(10);
     }
 }
 //------------------------------------------------------------------------
