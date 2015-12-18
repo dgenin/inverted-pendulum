@@ -8,7 +8,8 @@ void enable_irq(void);
 #include "driver.h"
 #undef ABROAD
 
-#define CENTER 0x5C80
+// Leaning center to the right to compensate
+#define CENTER (0x5C80 + 0x10)
 #define TIMER_INTERVAL 1000
 volatile unsigned int timer_test;
 volatile unsigned int timer_next;
@@ -16,6 +17,10 @@ int da[10000], dt[10000];
 
 //Hack: couldn't get the ld to link the correct libc function
 void __div0(void)
+{
+}
+
+void raise(void)
 {
 }
 
@@ -373,7 +378,7 @@ void balance()
 	  puts("Reached critical angle\r\n");
 	  break;
 	}
-      volts = (a*a)/(0x190000/10)+66;
+      volts = (a*a)/0x25000 + 66;
       set_motor_voltage(volts);
       if(dir > 0 && a > 0x100 && w < -0x10) {
 	//set_motor_voltage(80);

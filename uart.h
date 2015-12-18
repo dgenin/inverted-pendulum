@@ -66,8 +66,8 @@ void hexstring(unsigned int d){
   uart_putc(0x0A);
 }
 void hexstring_signed(unsigned int d){
-  if(d<0xFFFFFFFF/2) hexstring(d);
-  else {uart_putc('-'); hexstring(0xFFFFFFFF-d);}
+  if(d < (0xFFFFFFFF >> 1)) hexstring(d);
+  else {uart_putc('-'); hexstring(0xFFFFFFFF - d);}
 }
 //------------------------------------------------------------------------
 // UART input functions
