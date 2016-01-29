@@ -1,7 +1,7 @@
 
 ARMGNU ?= arm-linux-gnueabi
 
-LDOPS = -L /usr/lib/gcc-cross/arm-linux-gnueabi/4.7/ -lgcc
+LDOPS = -L /usr/lib/gcc-cross/arm-linux-gnueabi/4.7/ -L /usr/lib/arm-none-eabi/newlib -lc -lgcc
 COPS = -Wall -O2 -nostartfiles -ffreestanding -g --build-id=none
 #COPS = -Wall -O0 -nostdlib -nostartfiles -ffreestanding -g
 
@@ -25,11 +25,17 @@ vectors.o : vectors.s
 motor.o : motor.c driver.h
 	$(ARMGNU)-gcc $(COPS) -c motor.c -o motor.o
 
+cli.o : cli.c cli.h
+	$(ARMGNU)-gcc $(COPS) -c cli.c -o cli.o
+
 driver.o : driver.c driver.h uart.h
 	$(ARMGNU)-gcc $(COPS) -c driver.c -o driver.o
 
-driver.elf : memmap vectors.o driver.o motor.o
-	$(ARMGNU)-ld vectors.o motor.o driver.o -g -o driver.elf $(LDOPS) -T memmap
+dummy_syscall.o : dummy_syscall.c
+	$(ARMGNU)-gcc $(COPS) -c dummy_syscall.c -o dummy_syscall.o
+
+driver.elf : memmap vectors.o driver.o motor.o cli.o dummy_syscall.o
+	$(ARMGNU)-ld vectors.o motor.o cli.o driver.o -g -o driver.elf $(LDOPS) dummy_syscall.o -T memmap
 	$(ARMGNU)-objdump -D driver.elf > driver.list
 
 driver.bin : driver.elf

@@ -2,18 +2,20 @@
 #include "uart.h"
 #include "pwm.h"
 #include "i2c.h"
+#include "cli.h"
 void enable_irq(void);
 
-#define ABROAD
+#define ABROAD extern
 #include "driver.h"
 #undef ABROAD
 
 // Leaning center to the right to compensate
-#define CENTER (0x5C80 + 0x10)
+#define CENTER ((0x5B10 - 0x40) + center_bias)
 #define TIMER_INTERVAL 1000
 volatile unsigned int timer_test;
 volatile unsigned int timer_next;
 int da[10000], dt[10000];
+
 
 //Hack: couldn't get the ld to link the correct libc function
 void __div0(void)
@@ -89,7 +91,17 @@ void gpio_init (void) {
   //PUT32(GPFEN0, (1<<18)|(1<<17));
   //PUT32(GPEDS0, (1<<17));
 }
-   
+
+void init() {
+  center_bias = 0;
+  a2_scale = 0x4C00;
+  lean = 0x40;
+  gpio_init();
+  pwm_init();
+  uart_init();
+  i2c_init();
+  cli_init();
+}
 
 //------------------------------------------------------------------------
 static void position_irq_handler()
@@ -318,14 +330,21 @@ void calibrate()
 //------------------------------------------------------------------------
 void decompose_angle(unsigned int angle, int *abs_dev, int *dir)
 {
-  if (angle < CENTER)
+  unsigned int center;
+  
+  if (x < 0)
+    center = CENTER - lean;
+  else
+    center = CENTER + lean;
+
+  if (angle < center)
     {
-      *abs_dev = (CENTER-angle);
+      *abs_dev = (center-angle);
       *dir = 1;
     }
   else
     {
-      *abs_dev = (angle-CENTER);
+      *abs_dev = (angle-center);
       *dir = -1;
     }
 }
@@ -334,7 +353,7 @@ void balance()
 {
   unsigned int angle, angle_prev; //Current and previous raw angle sensor readings
   unsigned int time, time_prev; //Current and last angle sensor readings timestamps
-  unsigned int a, a_dir; //Absolute value of angle relative to vertical position and direction
+  unsigned int a; //Absolute value of angle relative to vertical position and direction
   int w; //Angular velocity of the pendulum
   int dir; //Direction to run the carriage in
   int i;
@@ -372,13 +391,19 @@ void balance()
       puts("dt:    "); hexstring(time - time_prev);
       puts("w:     "); hexstring_signed(w);
       puts("a:     "); hexstring(a);
+
       if(a > 0x750)
 	{
-	  motor_stop();
 	  puts("Reached critical angle\r\n");
 	  break;
 	}
-      volts = (a*a)/0x25000 + 66;
+      if ((x > limit) || (x < -limit))
+	{
+	  puts("hit limit\n\r");
+	  break;
+	}
+
+      volts = (a*a)/a2_scale + a2_offset;
       set_motor_voltage(volts);
       if(dir > 0 && a > 0x100 && w < -0x10) {
 	//set_motor_voltage(80);
@@ -389,12 +414,15 @@ void balance()
 	motor_run(-1);
       }
       usleep(10);
+
+      if(uart_getc_nb()>=0) break;
     }
+  motor_stop();
 }
 //------------------------------------------------------------------------
 /* void balance() */
 /* { */
-/*   //Smaller angle values left of CENTER, i.e., angle increases in the clockwise direction */
+/*   //Smaller angle values right of CENTER, i.e., angle increases in the counter-clockwise direction */
 /*   unsigned int angle, angle_prev; */
 /*   unsigned int time, time_prev; */
 /*   unsigned int a_prev, a; */
@@ -509,10 +537,7 @@ int notmain ( unsigned int earlypc )
   for(i=0; i<T_BUFFER_SIZE; i++)
     t[i] = 0;
 
-  gpio_init();
-  pwm_init();
-  uart_init();
-  i2c_init();
+  init();
   hexstring(0x87654321);
   
   timer_test = 0;
@@ -551,6 +576,9 @@ int notmain ( unsigned int earlypc )
   while(1) {
     ra=uart_getc_nb();
     if(ra>=0)
+      cli(ra);
+
+#if 0
       switch(ra) {
       case 't':
 	{
@@ -613,7 +641,8 @@ int notmain ( unsigned int earlypc )
 	puts("hex=");
 	hexstrings(ra);
 	puts("\n\r> ");
-      }            
+      }
+#endif
   }
 
   return(0);

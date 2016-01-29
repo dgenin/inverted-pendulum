@@ -1,5 +1,5 @@
 #include "dev_mem_map.h"
-#define ABROAD extern
+#define ABROAD
 #include "driver.h"
 #undef ABROAD
 
