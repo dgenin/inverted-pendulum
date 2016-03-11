@@ -16,7 +16,7 @@
  */
 unsigned int strlen(const char *str){
   unsigned int i;
-  for(i=0; i<255 && str[i]!='\x0'; i++)
+  for(i=0; i<4096 && str[i]!='\x0'; i++)
     ;
   return i;
 }

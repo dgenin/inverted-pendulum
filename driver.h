@@ -14,6 +14,7 @@ ABROAD int center_bias; //Bias to center setting
 ABROAD int lean; // Angle to add to center to keep in the middle of the track
 ABROAD int a2_scale; // Used to scale angle ^ 2 to obtain voltage in balance
 ABROAD int a2_offset; // Used to offset angle ^ 2/a2_scale to obtain voltage in balance
+ABROAD int ah; //Used to determine at what lean angle motor direction should reversed
 
 /* Globals updated in the tick ISR */
 ABROAD volatile int x; //Current position ring buffer in units of ticks ~ .006"

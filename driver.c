@@ -10,7 +10,7 @@ void enable_irq(void);
 #undef ABROAD
 
 // Leaning center to the right to compensate
-#define CENTER ((0x5B10 - 0x40) + center_bias)
+#define CENTER (5900 + center_bias)
 #define TIMER_INTERVAL 1000
 volatile unsigned int timer_test;
 volatile unsigned int timer_next;
@@ -93,9 +93,19 @@ void gpio_init (void) {
 }
 
 void init() {
-  center_bias = 0;
+  /*
+    lean = 100
+    a2s = 19456
+    a2o = 67
+    cb = 80
+    ah = 20
+  */
+
+  center_bias = 80;
   a2_scale = 0x4C00;
-  lean = 0x40;
+  a2_offset = 67;
+  lean = 100;
+  ah = 20;
   gpio_init();
   pwm_init();
   uart_init();
@@ -232,6 +242,7 @@ unsigned int read_magnitude()
     PUT32(BSC0_C, START_READ);
     wait_i2c_done();
     magnitude = (GET32(BSC0_FIFO)) << 8; //&0xFF) << 6;
+
     PUT32(BSC0_S, CLEAR_STATUS);
     PUT32(BSC0_FIFO, 0xFC);
     PUT32(BSC0_C, START_WRITE);
@@ -249,22 +260,25 @@ unsigned int read_angle()
     PUT32(BSC0_S, CLEAR_STATUS);
     PUT32(BSC0_FIFO, 0xFF);
     PUT32(BSC0_C, START_WRITE);
-    wait_i2c_done();
+    if (wait_i2c_done()) puts("i2c timed out\r\n");
     PUT32(BSC0_S, CLEAR_STATUS);
     PUT32(BSC0_C, START_READ);
-    wait_i2c_done();
-    angle = (GET32(BSC0_FIFO)) << 8;//&0xFF) << 6;
+    if (wait_i2c_done()) puts("i2c timed out\r\n");
+    angle = (GET32(BSC0_FIFO)&0xFF) << 6;//&0xFF) << 6;
+
     PUT32(BSC0_S, CLEAR_STATUS);
     PUT32(BSC0_FIFO, 0x00);
     PUT32(BSC0_C, START_WRITE);
-    wait_i2c_done();
+    if (wait_i2c_done()) puts("i2c timed out\r\n");
     PUT32(BSC0_S, CLEAR_STATUS);
     PUT32(BSC0_C, START_READ);
-    wait_i2c_done();
-    angle |= (GET32(BSC0_FIFO)); //&0x3F);
+    if (wait_i2c_done()) puts("i2c timed out\r\n");
+    angle |= (GET32(BSC0_FIFO)&0x3F); //&0x3F);
+
     return angle;
 }
 //------------------------------------------------------------------------
+
 void calibrate()
 {
   int i=0;
@@ -357,6 +371,7 @@ void balance()
   int w; //Angular velocity of the pendulum
   int dir; //Direction to run the carriage in
   int i;
+  char str[1024];
 
   //This turns off the speed control loop in the OE ISR 
   target_speed = 0;
@@ -385,14 +400,18 @@ void balance()
 
       //Stop if the angle is to large
       decompose_angle(angle, &a, &dir);
+#if 0
       puts("--------------\n\r");
       puts("angle: "); hexstring(angle);
       puts("da:    "); hexstring_signed(angle - angle_prev);
       puts("dt:    "); hexstring(time - time_prev);
       puts("w:     "); hexstring_signed(w);
       puts("a:     "); hexstring(a);
+#endif
 
-      if(a > 0x750)
+      sprintf(str, "%d, %u, %d\r\n", x, angle, control_dir*volts);
+      puts(str);
+      if(a > 455) // 455 = 10 degrees
 	{
 	  puts("Reached critical angle\r\n");
 	  break;
@@ -405,11 +424,11 @@ void balance()
 
       volts = (a*a)/a2_scale + a2_offset;
       set_motor_voltage(volts);
-      if(dir > 0 && a > 0x100 && w < -0x10) {
+      if((dir > 0) && (a > ah) && (w < -0x10)) {
 	//set_motor_voltage(80);
 	motor_run(1);
       }
-      if(dir < 0 && a > 0x100 && w > 0x10) {
+      if((dir < 0) && (a > ah) && (w > 0x10)) {
 	//set_motor_voltage(80);
 	motor_run(-1);
       }
@@ -568,7 +587,6 @@ int notmain ( unsigned int earlypc )
       set_motor_voltage(0);
       puts("stall detected\n\r");
     }
-  puts("\n\r> ");
 
   p1 = 7;
   p2 = 125;
