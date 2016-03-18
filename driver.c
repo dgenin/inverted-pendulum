@@ -101,10 +101,10 @@ void init() {
     ah = 20
   */
 
-  center_bias = 80;
-  a2_scale = 0x4C00;
-  a2_offset = 67;
-  lean = 100;
+  center_bias = -125;
+  a2_scale = 3000;
+  a2_offset = 72;
+  lean = 50;
   ah = 20;
   gpio_init();
   pwm_init();
@@ -346,10 +346,7 @@ void decompose_angle(unsigned int angle, int *abs_dev, int *dir)
 {
   unsigned int center;
   
-  if (x < 0)
-    center = CENTER - lean;
-  else
-    center = CENTER + lean;
+  center = CENTER + (x*lean)/2000;
 
   if (angle < center)
     {
@@ -409,7 +406,7 @@ void balance()
       puts("a:     "); hexstring(a);
 #endif
 
-      sprintf(str, "%d, %u, %d\r\n", x, angle, control_dir*volts);
+      sprintf(str, "%d, %d, %d\r\n", x, dir*a, control_dir*volts);
       puts(str);
       if(a > 455) // 455 = 10 degrees
 	{
