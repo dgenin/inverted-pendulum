@@ -40,15 +40,15 @@ void motor_stop1()
 //------------------------------------------------------------------------
 void move_to_limit(int direction)
 {
-  unsigned start_head;
+  unsigned start_tick;
 
-  start_head = t_head;
+  start_tick = last_tick;
   set_motor_voltage(75);
   motor_run(direction);
   
-  while(t_head == start_head)
+  while(start_tick == last_tick)
     ;
-  while(((NOW_TIME() - t[t_head]) < STALL_TIMEOUT) || ((NOW_TIME() - t[t_head]) < STALL_TIMEOUT))
+  while(((NOW_TIME() - last_tick) < STALL_TIMEOUT) || ((NOW_TIME() - last_tick) < STALL_TIMEOUT))
     ;
   motor_stop();
   hexstring(x);

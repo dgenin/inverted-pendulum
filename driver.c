@@ -11,11 +11,10 @@ void enable_irq(void);
 
 // Leaning center to the right to compensate
 #define CENTER (5900 + center_bias)
-#define TIMER_INTERVAL 1000
-volatile unsigned int timer_test;
+#define TIMER_INTERVAL 100
 volatile unsigned int timer_next;
 int da[10000], dt[10000];
-
+volatile static unsigned int last_state;
 
 //Hack: couldn't get the ld to link the correct libc function
 void __div0(void)
@@ -57,6 +56,7 @@ void gpio_init (void) {
   ra |= 1<<21; // gpio7 set to output
   ra &= ~(7<<24);
   ra |= 1<<24; // gpio8 set to output
+  /* Optical encoder input pin */
   ra &= ~(7<<27); // gpio9 set to input
   /* I2C I/O pins */
   //TODO: remove i2c0 code
@@ -77,17 +77,17 @@ void gpio_init (void) {
   for(ra=0;ra<150;ra++) dummy(ra);
   PUT32(GPPUDCLK0,0);
 
-  //enable pull down for gpio 17, 18, 6, 7    
+  //enable pull down for gpio 17, 18, 6, 7, 9    
   PUT32(GPPUD,1);
   for(ra=0;ra<150;ra++) dummy(ra);
-  PUT32(GPPUDCLK0,(1<<18)|(1<<17)|(1<<6)|(1<<7));
+  PUT32(GPPUDCLK0,(1<<18)|(1<<17)|(1<<6)|(1<<7)|(1<<9));
   for(ra=0;ra<150;ra++) dummy(ra);
   PUT32(GPPUDCLK0,0);
 
   //enable rising edge detection
-  //on gpio 17
-  PUT32(GPFEN0, (1<<17));
-  PUT32(GPREN0, 0);
+  //on gpio 17 & 9
+  PUT32(GPFEN0, (1<<17)|(1<<9));
+  PUT32(GPREN0, (1<<17)|(1<<9));
   //PUT32(GPFEN0, (1<<18)|(1<<17));
   //PUT32(GPEDS0, (1<<17));
 }
@@ -101,11 +101,17 @@ void init() {
     ah = 20
   */
 
+  x = 0;
   center_bias = -125;
   a2_scale = 3000;
   a2_offset = 72;
   lean = 50;
   ah = 20;
+  //For debugging position drift
+  encoder_head = 0;
+  //Last state of the position state machine
+  last_state = 0;
+  tick_error_count = 0;
   gpio_init();
   pwm_init();
   uart_init();
@@ -116,6 +122,7 @@ void init() {
 //------------------------------------------------------------------------
 static void position_irq_handler()
 {
+#if 0
   unsigned int t0, t1;
   unsigned int v_head;
   /* Detect direction of the carriage motion based on the
@@ -133,37 +140,61 @@ static void position_irq_handler()
   /* Clear edge detect interrupt flag.
    * Should be last to avoid (the very unlikely) ISR reentry.
    */
-  v = t1 - t0;
-  if(target_speed != 0)
-    {
-#if 0
-      int error = target_speed - v;
-      static unsigned int new_voltage = 90;
-      new_voltage -= error/100;
-      if (new_voltage > 100)
-	new_voltage = 100;
-      else if (new_voltage < 70)
-	new_voltage = 70;
-      set_motor_voltage(new_voltage);	  
-#else
-      if (v > target_speed) {
-	motor_voltage[v_head] = 90;
-	set_motor_voltage(90);
-      }
-      else {
-	motor_voltage[v_head] = 70;
-	set_motor_voltage(70);
-      }      
-#endif
-    }
   PUT32(GPEDS0, 1<<17);
+#else
+
+  unsigned int curr_state;
+  
+  last_tick = NOW_TIME();
+  curr_state = 0;
+  if (GET32(GPEDS0) & (1<<17)) {
+    PUT32(GPEDS0, 1<<17);
+  };
+  if (GET32(GPEDS0) & (1<<9)) {
+    PUT32(GPEDS0, 1<<9);
+  };
+  curr_state = GET32(GPLEV0)&((1<<9)|(1<<17));
+  curr_state = ((curr_state&(1<<9))?0:1) | ((curr_state&(1<<17))?0:2);
+  switch(last_state){
+  case 0 : 
+    switch(curr_state){
+    case 0 : break;
+    case 1 : x++; break; //TODO: Check that the sign is right.
+    case 2 : x--; break;
+    case 3 : tick_error_count++; break; //TODO: Handle the error case correctly.
+    }; break;
+  case 1 : switch(curr_state){
+    case 1 : break;
+    case 3 : x++; break; //TODO: Check that the sign is right.
+    case 0 : x--; break;
+    case 2 : tick_error_count++; break; //TODO: Handle the error case correctly.
+    }; break;
+  case 2 : switch(curr_state){
+    case 2 : break;
+    case 0 : x++; break; //TODO: Check that the sign is right.
+    case 3 : x--; break;
+    case 1 : tick_error_count++; break; //TODO: Handle the error case correctly.
+    }; break;
+  case 3 : switch(curr_state){
+    case 3 : break;
+    case 2 : x++; break; //TODO: Check that the sign is right.
+    case 1 : x--; break;
+    case 0 : tick_error_count++; break; //TODO: Handle the error case correctly.
+    }; break;
+  }  
+  last_state = curr_state;
+#endif
 }
 //------------------------------------------------------------------------
 static void timer_irq_handler()
 {
-  static unsigned int prev_time;
-  timer_test = NOW_TIME() - prev_time;
-  prev_time = NOW_TIME();
+  unsigned int v;
+  if (encoder_head < C_BUFFER_SIZE) {
+    v = (GET32(GPLEV0)&(1<<9))?0:1;
+    v |= (GET32(GPLEV0)&(1<<17))?0:2;
+    encoder[encoder_head] = v;
+    encoder_head = (encoder_head + 1);
+  }
   timer_next = timer_next + TIMER_INTERVAL;
   PUT32(TIMER_C1, timer_next);
   PUT32(TIMER_CS, 2);
@@ -406,8 +437,8 @@ void balance()
       puts("a:     "); hexstring(a);
 #endif
 
-      sprintf(str, "%d, %d, %d\r\n", x, dir*a, control_dir*volts);
-      puts(str);
+      //sprintf(str, "%d, %d, %d\r\n", x, dir*a, control_dir*volts);
+      //puts(str);
       if(a > 455) // 455 = 10 degrees
 	{
 	  puts("Reached critical angle\r\n");
@@ -549,14 +580,14 @@ int notmain ( unsigned int earlypc )
   motor_stop();
 
   /* Clear time and position ring buffers */
-  t_head = 0;
-  for(i=0; i<T_BUFFER_SIZE; i++)
-    t[i] = 0;
+  last_tick = 0;
+  //t_head = 0;
+  //for(i=0; i<T_BUFFER_SIZE; i++)
+  //  t[i] = 0;
 
   init();
   hexstring(0x87654321);
   
-  timer_test = 0;
   hexstring(0x1);
 
   
@@ -571,14 +602,12 @@ int notmain ( unsigned int earlypc )
   PUT32(TIMER_C1, timer_next);
   enable_irq();
   hexstring(0x3);
-  hexstring(t);
-  hexstring(motor_voltage);
 
   //probably a better way to flush the rx fifo.  depending on if and
   //which bootloader you used you might have some stuff show up in the
   //rx fifo.
   uart_flush_rx_fifo();
-  if(NOW_TIME() - t[t_head] > 1000)
+  if(NOW_TIME() - last_tick > 1000)
     {
       motor_stop();
       set_motor_voltage(0);
